@@ -43,8 +43,6 @@ jobs:
         uses: jaenster/setup-msvc@v1
         with:
           version: '14.00.50727.762'
-          components: bin,include,lib,platform_sdk_include,platform_sdk_lib
-          # If this fails, try removing the extras line and use the fallback below
           extras: directx-9-headers
 
       - name: Verify compiler
