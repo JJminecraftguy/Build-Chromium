@@ -16,45 +16,45 @@ jobs:
           echo "C:\Python25\Scripts" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
         shell: powershell
         
-      - name: Breakpad @ SVN r281
+      - name: Breakpad @ 2d7664e8 (pruned)
         run: |
-          git clone https://github.com/google/breakpad.git
+          git clone --filter=blob:none https://github.com/google/breakpad.git breakpad
           cd breakpad
-          $found = @(git log --all --grep="git-svn-id.*@281 " --format="%H %ad" --date=short)
-          Write-Host ">>> Breakpad: $($found.Count) match(es)"
-          foreach ($m in $found) { Write-Host "    $m" }
-          $commit = ($found[0] -split ' ')[0]
-          Write-Host ">>> Checking out: $commit"
-          git checkout $commit
+          git checkout 2d7664e8d477816e0641e822752f63982c1be74f
+          git branch -f main 2d7664e8d477816e0641e822752f63982c1be74f
+          git for-each-ref --format="%(refname:short)" refs/heads | Where-Object { $_ -ne 'main' } | ForEach-Object { git branch -D $_ }
+          git tag | ForEach-Object { git tag -d $_ }
+          git gc --aggressive --prune=now
           Copy-Item -Recurse . ..\src\breakpad\src
+        shell: powershell
 
-      - name: Googletest @ SVN r63
+      - name: Googletest @ 26ddf828 (pruned)
         run: |
-          git clone https://github.com/stp/googletest.git
+          git clone --filter=blob:none https://github.com/stp/googletest.git googletest
           cd googletest
-          $found = @(git log --all --grep="git-svn-id.*@63 " --format="%H %ad" --date=short)
-          Write-Host ">>> Googletest: $($found.Count) match(es)"
-          foreach ($m in $found) { Write-Host "    $m" }
-          $commit = ($found[0] -split ' ')[0]
-          Write-Host ">>> Checking out: $commit"
-          git checkout $commit
+          git checkout 26ddf828fa2870982315f4dc8dd4f6e4777f4d29
+          git branch -f main 26ddf828fa2870982315f4dc8dd4f6e4777f4d29
+          git for-each-ref --format="%(refname:short)" refs/heads | Where-Object { $_ -ne 'main' } | ForEach-Object { git branch -D $_ }
+          git tag | ForEach-Object { git tag -d $_ }
+          git gc --aggressive --prune=now
           Copy-Item -Recurse . ..\src\testing\gtest
+        shell: powershell
 
-      - name: V8 @ SVN r78
+      - name: V8 @ 4de96712 (pruned)
         run: |
-          git clone --filter=blob:none https://chromium.googlesource.com/v8/v8.git
+          git clone --filter=blob:none https://chromium.googlesource.com/v8/v8.git v8
           cd v8
-          $found = @(git log --all --grep="git-svn-id.*@78 " --format="%H %ad" --date=short)
-          Write-Host ">>> V8: $($found.Count) match(es)"
-          foreach ($m in $found) { Write-Host "    $m" }
-          $commit = ($found[0] -split ' ')[0]
-          Write-Host ">>> Checking out: $commit"
-          git checkout $commit
+          git checkout 4de96712f4295f4e5deaadc5d8a7429889eee00b
+          git branch -f main 4de96712f4295f4e5deaadc5d8a7429889eee00b
+          git for-each-ref --format="%(refname:short)" refs/heads | Where-Object { $_ -ne 'main' } | ForEach-Object { git branch -D $_ }
+          git tag | ForEach-Object { git tag -d $_ }
+          git gc --aggressive --prune=now
           Copy-Item -Recurse . ..\src\v8
+        shell: powershell
 
       - name: WebKit LayoutTests @ Safari-3-1-branch r31256
         run: |
-          git clone --filter=blob:none https://github.com/WebKit/WebKit.git
+          git clone --filter=blob:none --no-checkout https://webkit.googlesource.com/WebKit WebKit
           cd WebKit
           $found = @(git log --all --grep="git-svn-id.*@31256 " --format="%H %ad" --date=short)
           Write-Host ">>> WebKit: $($found.Count) match(es)"
@@ -62,7 +62,12 @@ jobs:
           $commit = ($found[0] -split ' ')[0]
           Write-Host ">>> Checking out: $commit"
           git checkout $commit
-          Copy-Item -Recurse "branches/Safari-3-1-branch/LayoutTests" ..\src\webkit\data\layout_tests
+          git branch -f main $commit
+          git for-each-ref --format="%(refname:short)" refs/heads | Where-Object { $_ -ne 'main' } | ForEach-Object { git branch -D $_ }
+          git tag | ForEach-Object { git tag -d $_ }
+          git gc --aggressive --prune=now
+          Copy-Item -Recurse "LayoutTests" ..\src\webkit\data\layout_tests
+        shell: powershell
 
       - name: Google URL @ SVN r92 (svndump fallback)
         run: |
@@ -75,7 +80,7 @@ jobs:
 
       - name: Chromium trunk deps (icu38@1227, WebKit@19)
         run: |
-          git clone --filter=blob:none https://chromium.googlesource.com/chromium/src.git
+          git clone --filter=blob:none https://chromium.googlesource.com/chromium/src.git src
           cd src
           $found = @(git log --all --grep="git-svn-id.*@1227 " --format="%H %ad" --date=short -- third_party/icu38)
           Write-Host ">>> Chromium icu38: $($found.Count) match(es)"
@@ -83,4 +88,9 @@ jobs:
           $commit = ($found[0] -split ' ')[0]
           Write-Host ">>> Checking out: $commit"
           git checkout $commit -- third_party/icu38
+          git branch -f main $commit
+          git for-each-ref --format="%(refname:short)" refs/heads | Where-Object { $_ -ne 'main' } | ForEach-Object { git branch -D $_ }
+          git tag | ForEach-Object { git tag -d $_ }
+          git gc --aggressive --prune=now
           Copy-Item -Recurse third_party\icu38 ..\..\src\third_party\icu38
+        shell: powershell
