@@ -83,17 +83,25 @@ jobs:
         run: |
           $drive = (Get-Content "$env:RUNNER_TEMP\vc_drive.txt").Trim()
           $setup = "${drive}:\setup.exe"
-          if (-not (Test-Path $setup)) {
-            # Some ISOs use a different entry point
-            Get-ChildItem "${drive}:\\" | ForEach-Object { Write-Host $_.Name }
-            Write-Error "setup.exe not found on ${drive}:"
-            exit 1
-          }
-          # /passive = unattended with progress, /norestart = no reboot
-          & $setup /passive /norestart
-          if ($LASTEXITCODE -ne 0) {
-            Write-Error "Install failed with exit code $LASTEXITCODE"
-            exit $LASTEXITCODE
+
+          # Show what's actually on the drive
+          Write-Host "Drive ${drive} contents:"
+          Get-ChildItem "${drive}:\\" -Recurse -Depth 1 | ForEach-Object { Write-Host "  $($_.FullName)" }
+
+          # Start-Process -Wait properly captures exit codes for GUI apps
+          # /passive = silent with progress bar, /norestart = no reboot
+          $proc = Start-Process -FilePath $setup -ArgumentList "/passive /norestart" -Wait -PassThru
+          Write-Host "Exit code: $($proc.ExitCode)"
+
+          if ($proc.ExitCode -ne 0) {
+            # Try /q (quiet) as fallback
+            Write-Host "Retrying with /q..."
+            $proc = Start-Process -FilePath $setup -ArgumentList "/q /norestart" -Wait -PassThru
+            Write-Host "Exit code: $($proc.ExitCode)"
+            if ($proc.ExitCode -ne 0) {
+              Write-Error "Install failed with exit code $($proc.ExitCode)"
+              exit $proc.ExitCode
+            }
           }
           Write-Host "VS2005 C++ Express installed"
 
