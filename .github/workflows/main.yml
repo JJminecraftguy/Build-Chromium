@@ -48,7 +48,15 @@ jobs:
         shell: pwsh
         run: cl.exe /?
 
+      - name: Cache DX9 headers
+        uses: actions/cache@v4
+        with:
+          path: dx9-sdk
+          key: dx9-sdk-dec2006
+          restore-keys: dx9-sdk-
+
       - name: Extract DirectX 9.0c SDK headers (Dec 2006)
+        if: steps.cache-dx9.outputs.cache-hit != 'true'
         shell: pwsh
         run: |
           curl.exe -L -o "$env:RUNNER_TEMP\dxsdk_dec2006.exe" `
@@ -56,12 +64,15 @@ jobs:
           7z x "$env:RUNNER_TEMP\dxsdk_dec2006.exe" "Include" -o"$env:RUNNER_TEMP\dx" -y
           7z x "$env:RUNNER_TEMP\dxsdk_dec2006.exe" "Lib" -o"$env:RUNNER_TEMP\dx" -y
           Remove-Item "$env:RUNNER_TEMP\dxsdk_dec2006.exe" -Force
-          $include = "$env:RUNNER_TEMP\dx\Include"
-          $lib = "$env:RUNNER_TEMP\dx\Lib"
-          echo "INCLUDE=$include;$($env:INCLUDE)" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-          echo "LIB=$lib;$($env:LIB)" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-          Write-Host "DX9 headers at: $include"
-          Test-Path "$include\d3d9.h"
+          # Move to the cache path
+          Move-Item "$env:RUNNER_TEMP\dx" "dx9-sdk"
+
+      - name: Set DX9 env vars
+        shell: pwsh
+        run: |
+          echo "INCLUDE=$PWD\dx9-sdk\Include;$($env:INCLUDE)" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          echo "LIB=$PWD\dx9-sdk\Lib;$($env:LIB)" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          Test-Path "$PWD\dx9-sdk\Include\d3d9.h"
           
       # ── 3. Clone Chromium ───────────────────────────────────────
       - name: Clone Chromium @ 4db48af7
