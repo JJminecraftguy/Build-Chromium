@@ -32,99 +32,39 @@ jobs:
           DISM /Online /Enable-Feature /FeatureName:NetFx3 /All /NoRestart
           Write-Host ".NET 3.5 enabled"
 
-      # ── 3. Get VC.ISO ───────────────────────────────────────────
-      # Option A: Direct download (simpler, ~430 MB)
-      - name: Download VC.ISO (direct)
-        shell: pwsh
-        run: |
-          $out = "$env:RUNNER_TEMP\VC.iso"
-          curl.exe -L -o "$out" "https://archive.org/download/vs-express-2005/VC.iso"
-          $size = (Get-Item $out).Length / 1MB
-          Write-Host "Downloaded: $size MB"
-          if ($size -lt 400) {
-            Write-Error "File too small — likely an HTML error page, not the ISO"
-            exit 1
-          }
+      # ── 1. Setup MSVC 2005 SP1 (minimal components) ────────────
+      - name: Setup MSVC 2005 SP1
+        uses: jaenster/setup-msvc@v1
+        with:
+          version: '14.00.50727.762'
+          components: bin,include,lib,platform_sdk_include,platform_sdk_lib
+          # If this fails, try removing the extras line and use the fallback below
+          extras: directx-9-headers
 
-      # Option B: Mount the big EE ISO and extract VC.ISO (use this
-      # if the direct URL above 404s or changes)
-      # - name: Download VS2005EE.iso
+      - name: Verify compiler
+        shell: pwsh
+        run: cl.exe /?
+
+      # ── 2. DirectX 9 headers (fallback if extras above fails) ──
+      # Uncomment if the extras line above doesn't resolve d3d9.h:
+      # - name: Extract DirectX 9 SDK headers
       #   shell: pwsh
       #   run: |
-      #     curl.exe -L -o "$env:RUNNER_TEMP\VS2005EE.iso" "https://archive.org/download/mvs-2005-ee/VS2005EE.iso"
-      #
-      # - name: Mount VS2005EE.iso and extract VC.ISO
-      #   shell: pwsh
-      #   run: |
-      #     $iso = "$env:RUNNER_TEMP\VS2005EE.iso"
-      #     Mount-DiskImage -ImagePath $iso
-      #     $drive = (Get-DiskImage -ImagePath $iso | Get-Volume).DriveLetter
-      #     Write-Host "Mounted at ${drive}:"
-      #     Get-ChildItem "${drive}:\\"
-      #     Copy-Item "${drive}:\VC.ISO" "$env:RUNNER_TEMP\VC.iso"
-      #     Dismount-DiskImage -ImagePath $iso
-      #     Remove-Item $iso -Force
-      #     Write-Host "Extracted VC.ISO, deleted VS2005EE.iso"
+      #     # DXSDK_Jun10.exe is the last official DX SDK (includes DX9/10/11)
+      #     curl.exe -L -o "$env:RUNNER_TEMP\DXSDK_Jun10.exe" `
+      #       "https://download.microsoft.com/download/a/e/7/ae743f1f-632b-4809-87a9-aa1bb3458e31/DXSDK_Jun10.exe"
+      #     7z x "$env:RUNNER_TEMP\DXSDK_Jun10.exe" "DXSDK/Include" -o"$env:RUNNER_TEMP\dx" -y
+      #     7z x "$env:RUNNER_TEMP\DXSDK_Jun10.exe" "DXSDK/Lib/x86" -o"$env:RUNNER_TEMP\dx" -y
+      #     Remove-Item "$env:RUNNER_TEMP\DXSDK_Jun10.exe" -Force
+      #     # Point INCLUDE/LIB at the extracted headers
+      #     $include = "$env:RUNNER_TEMP\dx\DXSDK\Include"
+      #     $lib = "$env:RUNNER_TEMP\dx\DXSDK\Lib\x86"
+      #     echo "INCLUDE=$include;$($env:INCLUDE)" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+      #     echo "LIB=$lib;$($env:LIB)" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+      #     Write-Host "DX9 headers at: $include"
+      #     Test-Path "$include\d3d9.h"
 
-      # ── 4. Mount VC.ISO and install ─────────────────────────────
-      - name: Mount VC.ISO
-        shell: pwsh
-        run: |
-          $iso = "$env:RUNNER_TEMP\VC.iso"
-          Mount-DiskImage -ImagePath $iso
-          $drive = (Get-DiskImage -ImagePath $iso | Get-Volume).DriveLetter
-          Write-Host "VC.ISO mounted at ${drive}:"
-          Get-ChildItem "${drive}:\\"
-          # Save drive letter for next step
-          "${drive}" | Out-File -FilePath "$env:RUNNER_TEMP\vc_drive.txt" -Encoding ascii
-
-      - name: Install Visual C++ 2005 Express
-        shell: pwsh
-        run: |
-          $drive = (Get-Content "$env:RUNNER_TEMP\vc_drive.txt").Trim()
-          $setup = "${drive}:\setup.exe"
-
-          # Show what's actually on the drive
-          Write-Host "Drive ${drive} contents:"
-          Get-ChildItem "${drive}:\\" -Recurse -Depth 1 | ForEach-Object { Write-Host "  $($_.FullName)" }
-
-          # Start-Process -Wait properly captures exit codes for GUI apps
-          # /passive = silent with progress bar, /norestart = no reboot
-          $proc = Start-Process -FilePath $setup -ArgumentList "/passive /norestart" -Wait -PassThru
-          Write-Host "Exit code: $($proc.ExitCode)"
-
-          if ($proc.ExitCode -ne 0) {
-            # Try /q (quiet) as fallback
-            Write-Host "Retrying with /q..."
-            $proc = Start-Process -FilePath $setup -ArgumentList "/q /norestart" -Wait -PassThru
-            Write-Host "Exit code: $($proc.ExitCode)"
-            if ($proc.ExitCode -ne 0) {
-              Write-Error "Install failed with exit code $($proc.ExitCode)"
-              exit $proc.ExitCode
-            }
-          }
-          Write-Host "VS2005 C++ Express installed"
-
-      - name: Dismount VC.ISO and clean up
-        shell: pwsh
-        run: |
-          $iso = "$env:RUNNER_TEMP\VC.iso"
-          Dismount-DiskImage -ImagePath $iso
-          Remove-Item $iso -Force
-          Remove-Item "$env:RUNNER_TEMP\vc_drive.txt" -Force
-
-      - name: Verify MSVC 2005 compiler
-        shell: pwsh
-        run: |
-          $cl = "C:\Program Files (x86)\Microsoft Visual Studio 8\VC\bin\cl.exe"
-          if (-not (Test-Path $cl)) {
-            Write-Error "cl.exe not found at $cl"
-            exit 1
-          }
-          & $cl /?
-          Write-Host "MSVC 2005 compiler verified"
-
-      # ── 5. Clone Chromium ───────────────────────────────────────
+      # ── 3. Clone Chromium ───────────────────────────────────────
       - name: Clone Chromium @ 4db48af7
         uses: actions/checkout@v4
         with:
@@ -139,7 +79,7 @@ jobs:
           Get-Content "chromium\chrome\VERSION" -ErrorAction SilentlyContinue
           Get-ChildItem "chromium" -Name | Select-Object -First 20
 
-      # ── 6. (Placeholder) Build ──────────────────────────────────
+      # ── 4. (Placeholder) Build ──────────────────────────────────
       - name: Build (placeholder)
         shell: pwsh
         run: |
@@ -148,7 +88,3 @@ jobs:
           #   - Python 2.7 (not pre-installed)
           #   - The correct SCons entry point for this commit
           #   - Third-party deps (WebKit, V8, etc.)
-          #   - MSVC 2005 environment variables (vsvars32.bat)
-          #
-          # Example env setup:
-          #   cmd /c "call `"C:\Program Files (x86)\Microsoft Visual Studio 8\VC\bin\..\..\vcvars32.bat`" && scons.py"
