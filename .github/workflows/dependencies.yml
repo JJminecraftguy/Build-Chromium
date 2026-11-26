@@ -1,0 +1,82 @@
+name: Fetch 2008 Chromium deps
+on: [workflow_dispatch]
+
+jobs:
+  fetch:
+    runs-on: windows-latest
+    steps:
+      - name: Setup SVN (for svndump fallback)
+        uses: AmpScm/setup-subversion@v1
+
+      - name: Install Python 2.7
+        run: |
+          Start-BitsTransfer -Uri "https://www.python.org/ftp/python/2.7.18/python-2.7.18.exe" -Destination "$env:RUNNER_TEMP\py27.msi"
+          msiexec /i "$env:RUNNER_TEMP\py27.msi" /qn TARGETDIR="C:\Python27"
+          echo "C:\Python27" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          echo "C:\Python27\Scripts" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+        shell: powershell
+
+      - name: Breakpad @ SVN r281
+        run: |
+          git clone https://github.com/google/breakpad.git
+          cd breakpad
+          $matches = git log --all --grep="git-svn-id.*@281 " --format="%H %ad" --date=short
+          Write-Host ">>> Breakpad: $($matches.Count) match(es)"
+          foreach ($m in $matches) { Write-Host "    $m" }
+          $commit = ($matches[0] -split ' ')[0]
+          git checkout $commit
+          Copy-Item -Recurse . ..\src\breakpad\src
+
+      - name: Googletest @ SVN r63
+        run: |
+          git clone https://github.com/stp/googletest.git
+          cd googletest
+          $matches = git log --all --grep="git-svn-id.*@63 " --format="%H %ad" --date=short
+          Write-Host ">>> Googletest: $($matches.Count) match(es)"
+          foreach ($m in $matches) { Write-Host "    $m" }
+          $commit = ($matches[0] -split ' ')[0]
+          git checkout $commit
+          Copy-Item -Recurse . ..\src\testing\gtest
+
+      - name: V8 @ SVN r78
+        run: |
+          git clone --filter=blob:none https://chromium.googlesource.com/v8/v8.git
+          cd v8
+          $matches = git log --all --grep="git-svn-id.*@78 " --format="%H %ad" --date=short
+          Write-Host ">>> V8: $($matches.Count) match(es)"
+          foreach ($m in $matches) { Write-Host "    $m" }
+          $commit = ($matches[0] -split ' ')[0]
+          git checkout $commit
+          Copy-Item -Recurse . ..\src\v8
+
+      - name: WebKit LayoutTests @ Safari-3-1-branch r31256
+        run: |
+          git clone --filter=blob:none https://github.com/WebKit/WebKit.git
+          cd WebKit
+          $matches = git log --all --grep="git-svn-id.*@31256 " --format="%H %ad" --date=short
+          Write-Host ">>> WebKit: $($matches.Count) match(es)"
+          foreach ($m in $matches) { Write-Host "    $m" }
+          $commit = ($matches[0] -split ' ')[0]
+          git checkout $commit
+          Copy-Item -Recurse "branches/Safari-3-1-branch/LayoutTests" ..\src\webkit\data\layout_tests
+
+      - name: Google URL @ SVN r92 (svndump fallback)
+        run: |
+          # No good git mirror exists — use the GCS svndump
+          Invoke-WebRequest -Uri "https://storage.googleapis.com/google-code-archive-source/v2/code.google.com/google-url/repo.svndump.gz" -OutFile "$env:RUNNER_TEMP\google-url.svndump.gz"
+          7z x "$env:RUNNER_TEMP\google-url.svndump.gz" -o"$env:RUNNER_TEMP" -y
+          svnadmin create "$env:RUNNER_TEMP\google-url-svn"
+          svnadmin load "$env:RUNNER_TEMP\google-url-svn" < "$env:RUNNER_TEMP\google-url.svndump"
+          svn checkout "file:///$($env:RUNNER_TEMP.Replace('\','/'))/google-url-svn/trunk@92" src\googleurl
+        shell: powershell
+
+      - name: Chromium trunk deps (icu38@1227, WebKit@19)
+        run: |
+          git clone --filter=blob:none https://chromium.googlesource.com/chromium/src.git
+          cd src
+          $matches = git log --all --grep="git-svn-id.*@1227 " --format="%H %ad" --date=short -- third_party/icu38
+          Write-Host ">>> Chromium icu38: $($matches.Count) match(es)"
+          foreach ($m in $matches) { Write-Host "    $m" }
+          $commit = ($matches[0] -split ' ')[0]
+          git checkout $commit -- third_party/icu38
+          Copy-Item -Recurse third_party\icu38 ..\..\src\third_party\icu38
