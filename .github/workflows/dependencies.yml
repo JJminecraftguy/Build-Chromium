@@ -32,10 +32,11 @@ jobs:
         run: |
           git clone https://github.com/stp/googletest.git
           cd googletest
-          $matches = git log --all --grep="git-svn-id.*@63 " --format="%H %ad" --date=short
-          Write-Host ">>> Googletest: $($matches.Count) match(es)"
-          foreach ($m in $matches) { Write-Host "    $m" }
-          $commit = ($matches[0] -split ' ')[0]
+          $found = @(git log --all --grep="git-svn-id.*@63 " --format="%H %ad" --date=short)
+          Write-Host ">>> Googletest: $($found.Count) match(es)"
+          foreach ($m in $found) { Write-Host "    $m" }
+          $commit = ($found[0] -split ' ')[0]
+          Write-Host ">>> Checking out: $commit"
           git checkout $commit
           Copy-Item -Recurse . ..\src\testing\gtest
 
@@ -43,10 +44,11 @@ jobs:
         run: |
           git clone --filter=blob:none https://chromium.googlesource.com/v8/v8.git
           cd v8
-          $matches = git log --all --grep="git-svn-id.*@78 " --format="%H %ad" --date=short
-          Write-Host ">>> V8: $($matches.Count) match(es)"
-          foreach ($m in $matches) { Write-Host "    $m" }
-          $commit = ($matches[0] -split ' ')[0]
+          $found = @(git log --all --grep="git-svn-id.*@78 " --format="%H %ad" --date=short)
+          Write-Host ">>> V8: $($found.Count) match(es)"
+          foreach ($m in $found) { Write-Host "    $m" }
+          $commit = ($found[0] -split ' ')[0]
+          Write-Host ">>> Checking out: $commit"
           git checkout $commit
           Copy-Item -Recurse . ..\src\v8
 
@@ -54,16 +56,16 @@ jobs:
         run: |
           git clone --filter=blob:none https://github.com/WebKit/WebKit.git
           cd WebKit
-          $matches = git log --all --grep="git-svn-id.*@31256 " --format="%H %ad" --date=short
-          Write-Host ">>> WebKit: $($matches.Count) match(es)"
-          foreach ($m in $matches) { Write-Host "    $m" }
-          $commit = ($matches[0] -split ' ')[0]
+          $found = @(git log --all --grep="git-svn-id.*@31256 " --format="%H %ad" --date=short)
+          Write-Host ">>> WebKit: $($found.Count) match(es)"
+          foreach ($m in $found) { Write-Host "    $m" }
+          $commit = ($found[0] -split ' ')[0]
+          Write-Host ">>> Checking out: $commit"
           git checkout $commit
           Copy-Item -Recurse "branches/Safari-3-1-branch/LayoutTests" ..\src\webkit\data\layout_tests
 
       - name: Google URL @ SVN r92 (svndump fallback)
         run: |
-          # No good git mirror exists — use the GCS svndump
           Invoke-WebRequest -Uri "https://storage.googleapis.com/google-code-archive-source/v2/code.google.com/google-url/repo.svndump.gz" -OutFile "$env:RUNNER_TEMP\google-url.svndump.gz"
           7z x "$env:RUNNER_TEMP\google-url.svndump.gz" -o"$env:RUNNER_TEMP" -y
           svnadmin create "$env:RUNNER_TEMP\google-url-svn"
@@ -75,9 +77,10 @@ jobs:
         run: |
           git clone --filter=blob:none https://chromium.googlesource.com/chromium/src.git
           cd src
-          $matches = git log --all --grep="git-svn-id.*@1227 " --format="%H %ad" --date=short -- third_party/icu38
-          Write-Host ">>> Chromium icu38: $($matches.Count) match(es)"
-          foreach ($m in $matches) { Write-Host "    $m" }
-          $commit = ($matches[0] -split ' ')[0]
+          $found = @(git log --all --grep="git-svn-id.*@1227 " --format="%H %ad" --date=short -- third_party/icu38)
+          Write-Host ">>> Chromium icu38: $($found.Count) match(es)"
+          foreach ($m in $found) { Write-Host "    $m" }
+          $commit = ($found[0] -split ' ')[0]
+          Write-Host ">>> Checking out: $commit"
           git checkout $commit -- third_party/icu38
           Copy-Item -Recurse third_party\icu38 ..\..\src\third_party\icu38
