@@ -61,11 +61,37 @@ jobs:
         run: |
           curl.exe -L -o "$env:RUNNER_TEMP\dxsdk_dec2006.exe" `
             "https://archive.org/download/dxsdk_dec2006/dxsdk_dec2006.exe"
-          7z x "$env:RUNNER_TEMP\dxsdk_dec2006.exe" "Include" -o"$env:RUNNER_TEMP\dx" -y
-          7z x "$env:RUNNER_TEMP\dxsdk_dec2006.exe" "Lib" -o"$env:RUNNER_TEMP\dx" -y
+
+          # Step 1: Extract the inner .cab from the PE self-extractor
+          7z x "$env:RUNNER_TEMP\dxsdk_dec2006.exe" -o"$env:RUNNER_TEMP\dx_cab" -y
+
+          # Find the cab (it may be named CABINET or have an extension)
+          $cab = Get-ChildItem "$env:RUNNER_TEMP\dx_cab" -Filter "*.cab" -Recurse | Select-Object -First 1
+          if (-not $cab) {
+            $cab = Get-ChildItem "$env:RUNNER_TEMP\dx_cab" -Recurse | Where-Object { $_.Length -gt 100MB } | Select-Object -First 1
+          }
+          Write-Host "CAB: $($cab.FullName) ($([math]::Round($cab.Length/1MB,1)) MB)"
+
+          # Step 2: Extract only Include and Lib from the cab
+          7z x $cab.FullName "Include" -o"$env:RUNNER_TEMP\dx" -y
+          7z x $cab.FullName "Lib" -o"$env:RUNNER_TEMP\dx" -y
+
+          # Cleanup
           Remove-Item "$env:RUNNER_TEMP\dxsdk_dec2006.exe" -Force
-          # Move to the cache path
+          Remove-Item "$env:RUNNER_TEMP\dx_cab" -Recurse -Force
+
+          # Move to cache path
           Move-Item "$env:RUNNER_TEMP\dx" "dx9-sdk"
+
+          # Verify
+          $d3d9 = Get-ChildItem "dx9-sdk" -Recurse -Filter "d3d9.h" | Select-Object -First 1
+          if ($d3d9) {
+            Write-Host "Found d3d9.h at: $($d3d9.FullName)"
+          } else {
+            Write-Host "d3d9.h NOT found. Contents:"
+            Get-ChildItem "dx9-sdk" -Recurse -Depth 2 | ForEach-Object { Write-Host "  $($_.FullName)" }
+            exit 1
+          }
 
       - name: Set DX9 env vars
         shell: pwsh
