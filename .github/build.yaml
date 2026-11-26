@@ -1,0 +1,111 @@
+name: build-chrome-0.2
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-2022
+    timeout-minutes: 360
+
+    steps:
+      # ── 1. Free disk space ──────────────────────────────────────
+      - name: Show initial disk usage
+        shell: pwsh
+        run: Get-PSDrive C | Select-Object Used, Free
+
+      - name: Remove pre-installed toolchains
+        shell: pwsh
+        run: |
+          # Visual Studio 2022 Enterprise (~10 GB)
+          Remove-Item -Recurse -Force "C:\Program Files\Microsoft Visual Studio\2022" -ErrorAction SilentlyContinue
+          # Android SDK + NDK (~3-4 GB)
+          Remove-Item -Recurse -Force "C:\Android" -ErrorAction SilentlyContinue
+          # .NET SDKs (~2 GB)
+          Remove-Item -Recurse -Force "C:\Program Files\dotnet" -ErrorAction SilentlyContinue
+          # Hosted tool cache (Go, CodeQL, etc.)
+          Remove-Item -Recurse -Force "$env:AGENT_TOOLSDIRECTORY" -ErrorAction SilentlyContinue
+          # Chrome / Edge / Firefox (browsers)
+          Remove-Item -Recurse -Force "C:\Program Files\Google\Chrome" -ErrorAction SilentlyContinue
+          Remove-Item -Recurse -Force "C:\Program Files (x86)\Microsoft\EdgeCore" -ErrorAction SilentlyContinue
+          Remove-Item -Recurse -Force "C:\Program Files\Mozilla Firefox" -ErrorAction SilentlyContinue
+          # Java JDKs
+          Remove-Item -Recurse -Force "C:\Program Files\Java" -ErrorAction SilentlyContinue
+          Remove-Item -Recurse -Force "C:\Program Files\Eclipse Adoptium" -ErrorAction SilentlyContinue
+
+      - name: Show freed disk
+        shell: pwsh
+        run: Get-PSDrive C | Select-Object Used, Free
+
+      # ── 2. Install MSVC 2005 SP1 ───────────────────────────────
+      - name: Enable .NET 3.5 (required by VS2005 installer)
+        shell: pwsh
+        run: |
+          DISM /Online /Enable-Feature /FeatureName:NetFx3 /All /NoRestart
+          Write-Host ".NET 3.5 enabled"
+
+      - name: Download VS2005 SP1
+        shell: pwsh
+        run: |
+          # ⚠️  REPLACE with a working URL to the VS2005 SP1 full installer (~1.5 GB)
+          #     e.g. from archive.org, or a corporate mirror
+          $url = "https://archive.org/download/VS2005SP1/vs80sp1.exe"
+          curl.exe -L -o "$env:RUNNER_TEMP\vs80sp1.exe" "$url"
+          Write-Host "Downloaded: $((Get-Item "$env:RUNNER_TEMP\vs80sp1.exe").Length / 1MB) MB"
+
+      - name: Install VS2005 SP1 (full, silent)
+        shell: pwsh
+        run: |
+          # /passive  = unattended (shows progress bar, no interaction)
+          # /norestart = don't reboot after
+          # No component-select flag exists for VS2005; this installs the full IDE + compiler
+          & "$env:RUNNER_TEMP\vs80sp1.exe" /passive /norestart
+          if ($LASTEXITCODE -ne 0) {
+            Write-Error "VS2005 install failed with exit code $LASTEXITCODE"
+            exit $LASTEXITCODE
+          }
+
+      - name: Verify MSVC 2005 compiler
+        shell: pwsh
+        run: |
+          $cl = "C:\Program Files (x86)\Microsoft Visual Studio 8\VC\bin\cl.exe"
+          if (-not (Test-Path $cl)) {
+            Write-Error "cl.exe not found at $cl"
+            exit 1
+          }
+          & $cl /?
+          Write-Host "MSVC 2005 compiler verified"
+
+      - name: Clean up VS2005 installer
+        shell: pwsh
+        run: Remove-Item -Force "$env:RUNNER_TEMP\vs80sp1.exe"
+
+      # ── 3. Clone Chromium at the target commit ─────────────────
+      - name: Clone Chromium @ 4db48af7
+        uses: actions/checkout@v4
+        with:
+          repository: chromium/chromium
+          ref: "4db48af7ca622fe2b6d521abd7116f76e3d9ecb1"
+          fetch-depth: 1
+          path: chromium
+
+      - name: Show Chromium version
+        shell: pwsh
+        run: |
+          Get-Content "chromium\chrome\VERSION" -ErrorAction SilentlyContinue
+          Get-ChildItem "chromium" | Select-Object Name
+
+      # ── 4. (Placeholder) Build ─────────────────────────────────
+      - name: Build (placeholder)
+        shell: pwsh
+        run: |
+          Write-Host "TODO: add build steps here"
+          # The 2008-era Chromium used SCons. You'll likely need:
+          #   - Python 2.7 (not pre-installed on Server 2022)
+          #   - The correct SCons entry point for this commit
+          #   - Third-party deps (WebKit, V8, etc.)
+          #   - MSVC 2005 environment variables (vsvars32.bat)
+          #
+          # Example env setup:
+          #   cmd /c "call `"C:\Program Files (x86)\Microsoft Visual Studio 8\VC\bin\..\..\vcvars32.bat`" && scons.py"
+
