@@ -31,6 +31,12 @@ jobs:
         run: |
           DISM /Online /Enable-Feature /FeatureName:NetFx3 /All /NoRestart
           Write-Host ".NET 3.5 enabled"
+          
+      # ── 1. Install Go (required by setup-msvc v1.1.0) ──────────
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: 'stable'
 
       # ── 1. Setup MSVC 2005 SP1 (minimal components) ────────────
       - name: Setup MSVC 2005 SP1
