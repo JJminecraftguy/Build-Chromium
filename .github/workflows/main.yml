@@ -43,31 +43,26 @@ jobs:
         uses: jaenster/setup-msvc@v1
         with:
           version: '14.00.50727.762'
-          extras: directx-9-headers
 
       - name: Verify compiler
         shell: pwsh
         run: cl.exe /?
 
-      # ── 2. DirectX 9 headers (fallback if extras above fails) ──
-      # Uncomment if the extras line above doesn't resolve d3d9.h:
-      # - name: Extract DirectX 9 SDK headers
-      #   shell: pwsh
-      #   run: |
-      #     # DXSDK_Jun10.exe is the last official DX SDK (includes DX9/10/11)
-      #     curl.exe -L -o "$env:RUNNER_TEMP\DXSDK_Jun10.exe" `
-      #       "https://download.microsoft.com/download/a/e/7/ae743f1f-632b-4809-87a9-aa1bb3458e31/DXSDK_Jun10.exe"
-      #     7z x "$env:RUNNER_TEMP\DXSDK_Jun10.exe" "DXSDK/Include" -o"$env:RUNNER_TEMP\dx" -y
-      #     7z x "$env:RUNNER_TEMP\DXSDK_Jun10.exe" "DXSDK/Lib/x86" -o"$env:RUNNER_TEMP\dx" -y
-      #     Remove-Item "$env:RUNNER_TEMP\DXSDK_Jun10.exe" -Force
-      #     # Point INCLUDE/LIB at the extracted headers
-      #     $include = "$env:RUNNER_TEMP\dx\DXSDK\Include"
-      #     $lib = "$env:RUNNER_TEMP\dx\DXSDK\Lib\x86"
-      #     echo "INCLUDE=$include;$($env:INCLUDE)" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-      #     echo "LIB=$lib;$($env:LIB)" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-      #     Write-Host "DX9 headers at: $include"
-      #     Test-Path "$include\d3d9.h"
-
+      - name: Extract DirectX 9.0c SDK headers (Dec 2006)
+        shell: pwsh
+        run: |
+          curl.exe -L -o "$env:RUNNER_TEMP\dxsdk_dec2006.exe" `
+            "https://archive.org/download/dxsdk_dec2006/dxsdk_dec2006.exe"
+          7z x "$env:RUNNER_TEMP\dxsdk_dec2006.exe" "Include" -o"$env:RUNNER_TEMP\dx" -y
+          7z x "$env:RUNNER_TEMP\dxsdk_dec2006.exe" "Lib" -o"$env:RUNNER_TEMP\dx" -y
+          Remove-Item "$env:RUNNER_TEMP\dxsdk_dec2006.exe" -Force
+          $include = "$env:RUNNER_TEMP\dx\Include"
+          $lib = "$env:RUNNER_TEMP\dx\Lib"
+          echo "INCLUDE=$include;$($env:INCLUDE)" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          echo "LIB=$lib;$($env:LIB)" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          Write-Host "DX9 headers at: $include"
+          Test-Path "$include\d3d9.h"
+          
       # ── 3. Clone Chromium ───────────────────────────────────────
       - name: Clone Chromium @ 4db48af7
         uses: actions/checkout@v4
