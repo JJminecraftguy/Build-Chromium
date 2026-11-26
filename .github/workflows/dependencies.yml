@@ -20,10 +20,11 @@ jobs:
         run: |
           git clone https://github.com/google/breakpad.git
           cd breakpad
-          $matches = git log --all --grep="git-svn-id.*@281 " --format="%H %ad" --date=short
-          Write-Host ">>> Breakpad: $($matches.Count) match(es)"
-          foreach ($m in $matches) { Write-Host "    $m" }
-          $commit = ($matches[0] -split ' ')[0]
+          $found = git log --all --grep="git-svn-id.*@281 " --format="%H %ad" --date=short
+          Write-Host ">>> Breakpad: $($found.Count) match(es)"
+          foreach ($m in $found) { Write-Host "    $m" }
+          $commit = ($found[0] -split ' ')[0]
+          Write-Host ">>> Checking out: $commit"
           git checkout $commit
           Copy-Item -Recurse . ..\src\breakpad\src
 
