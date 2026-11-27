@@ -341,35 +341,6 @@ jobs:
             "https://raw.githubusercontent.com/JJminecraftguy/Build-Chromium/main/midl.exe"
           Write-Host "midl.exe: $((Get-Item "$env:MSVC_ROOT\bin\midl.exe").Length) bytes"
 
-      - name: Apply source patches
-        shell: pwsh
-        run: |
-          Set-Location "$env:GITHUB_WORKSPACE\chromium"
-
-          # Patch 1: build_component fallback
-          $f = "build\SConscript.main"
-          $content = Get-Content $f -Raw
-          $content = $content -replace "Import\('build_component'\)", "if 'build_component' not in globals():`n    build_component = 'chrome'`nImport('build_component')"
-          Set-Content $f $content -NoNewline
-
-          # Add more patches here...
-
-          & "C:\Program Files\Git\bin\git.exe" diff > "$env:GITHUB_WORKSPACE\patch.patch"
-          Write-Host "Generated patch:"
-          Get-Content "$env:GITHUB_WORKSPACE\patch.patch"
-          # Add more patches here as needed...
-
-          # Generate the patch from the diff
-          & "C:\Program Files\Git\bin\git.exe" diff > "$env:GITHUB_WORKSPACE\patch.patch"
-          Write-Host "Generated patch:"
-          Get-Content "$env:GITHUB_WORKSPACE\patch.patch"
-
-      - name: Upload patch artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: patch.patch
-          path: patch.patch
-
       - name: Verify Python 2.4
         shell: pwsh
         run: |
