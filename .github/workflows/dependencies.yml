@@ -156,6 +156,14 @@ jobs:
           path: src/googleurl
           key: googleurl-r92
 
+      - name: Get icu38_main.scons
+        run: |
+          curl.exe -L -o src\third_party\icu38\icu38_main.scons "https://chromium.googlesource.com/chromium/src/+/f8044caea87087248edfe0b97d8e338f04e189d9/third_party/icu38/icu38_main.scons?format=TEXT"
+          # The ?format=TEXT returns base64
+          $b64 = Get-Content src\third_party\icu38\icu38_main.scons -Raw
+          $bytes = [Convert]::FromBase64String($b64)
+          [IO.File]::WriteAllBytes("src\third_party\icu38\icu38_main.scons", $bytes)
+
       # --- ICU 3.8.1 ---
       - name: Restore ICU cache
         id: icu-cache
