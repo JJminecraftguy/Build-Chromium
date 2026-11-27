@@ -416,6 +416,7 @@ jobs:
           }
 
           # Patch Chromium's V8 SCons invocation.
+       
           $file = Join-Path $env:GITHUB_WORKSPACE "chromium\build\SConscript.v8"
 
           if (-not (Test-Path $file)) {
@@ -424,34 +425,48 @@ jobs:
 
           $content = [System.IO.File]::ReadAllText($file)
 
-          $oldFlags = "SCONSFLAGS='-Q --warn=no-deprecated')"
-          $newFlags = "SCONSFLAGS='-Q --warn=no-deprecated os=win32 mode=debug snapshot=on')"
+          # Correct V8 output paths and build the shell sample.
+          $content = $content.Replace(
+            "File('#/../v8/bin/debug/mksnapshot.exe')",
+            "File('#/../v8/obj/debug/mksnapshot.exe')"
+          )
 
-          if ($content.Contains($newFlags)) {
-            Write-Host "V8 SCons flags already patched."
+          $content = $content.Replace(
+            "File('#/../v8/bin/release/v8.exe')",
+            "File('#/../v8/obj/release/shell.exe')"
+          )
+
+          $content = $content.Replace(
+            "File('#/../v8/bin/debug/v8.lib'),",
+            "File('#/../v8/v8.lib')"
+          )
+
+          $content = $content.Replace(
+            "File('#/../v8/bin/debug/snapshot-empty.obj')",
+            "File('#/../v8/obj/debug/snapshot-empty.obj')"
+          )
+
+          # Request the shell sample and both debug/release outputs.
+          $oldFlags = "SCONSFLAGS='-Q --warn=no-deprecated')"
+          $debugFlags = "SCONSFLAGS='-Q --warn=no-deprecated os=win32 mode=debug snapshot=on sample=shell')"
+
+          $oldPatchedFlags = "SCONSFLAGS='-Q --warn=no-deprecated os=win32 mode=debug snapshot=on')"
+
+          if ($content.Contains($oldFlags)) {
+            $content = $content.Replace($oldFlags, $debugFlags)
           }
-          elseif ($content.Contains($oldFlags)) {
-            $content = $content.Replace($oldFlags, $newFlags)
-            Write-Host "Enabled V8 debug mode and snapshots."
+          elseif ($content.Contains($oldPatchedFlags)) {
+            $content = $content.Replace($oldPatchedFlags, $debugFlags)
           }
-          else {
+          elseif (-not $content.Contains($debugFlags)) {
             throw "Could not find expected SCONSFLAGS in SConscript.v8"
           }
 
-          # Fix the accidental one-element tuple caused by the trailing comma.
-          $oldLib = "v8_lib = File('#/../v8/bin/debug/v8.lib'),"
-          $newLib = "v8_lib = File('#/../v8/bin/debug/v8.lib')"
-
-          if ($content.Contains($oldLib)) {
-            $content = $content.Replace($oldLib, $newLib)
-            Write-Host "Fixed v8_lib File() declaration."
-          }
-          elseif ($content.Contains($newLib)) {
-            Write-Host "v8_lib declaration already fixed."
-          }
-          else {
-            throw "Could not find expected v8_lib declaration."
-          }
+          # The shell sample is built in release mode, so build both modes.
+          $content = $content.Replace(
+            "SCONSFLAGS='-Q --warn=no-deprecated os=win32 mode=debug snapshot=on sample=shell'",
+            "SCONSFLAGS='-Q --warn=no-deprecated os=win32 mode=debug,release snapshot=on sample=shell'"
+          )
 
           [System.IO.File]::WriteAllText(
             $file,
@@ -459,49 +474,14 @@ jobs:
             [System.Text.UTF8Encoding]::new($false)
           )
 
-          Write-Host "=== Applied V8 configuration ==="
-          Select-String -Path $file -Pattern "v8_lib|SCONSFLAGS"
+          Write-Host "=== Patched V8 configuration ==="
+          Get-Content $file
 
           # Save the resulting source diff.
           & "C:\Program Files\Git\bin\git.exe" diff > "$env:GITHUB_WORKSPACE\patch.patch"
 
           Write-Host "=== Generated patch ==="
           Get-Content "$env:GITHUB_WORKSPACE\patch.patch"
-
-
-          Set-Location "$env:GITHUB_WORKSPACE\chromium\v8"
-
-          Write-Host "=== V8 build directory configuration ==="
-          Select-String -Path SConstruct `
-            -Pattern "build_dir|BUILD_DIR|obj/|bin/|variant_dir|VariantDir|Program"
-
-          Write-Host "=== V8 SConstruct build setup ==="
-          $lines = Get-Content SConstruct
-          $lines[350..490]
-
-          Write-Host "=== V8 generated directories ==="
-          Get-ChildItem -Directory -Recurse |
-            Where-Object {
-              $_.FullName -match '\\(bin|obj)\\'
-            } |
-            Select-Object -ExpandProperty FullName
-
-          Write-Host "=== V8 generated files ==="
-          Get-ChildItem -Recurse -File |
-            Where-Object {
-              $_.Name -match 'mksnapshot|snapshot-empty|v8\.lib'
-            } |
-            Select-Object -ExpandProperty FullName
-
-          Write-Host "=== V8 sample options ==="
-          Select-String -Path SConstruct -Pattern "sample.*shell|VerifyOptions|SIMPLE_OPTIONS"
-
-          Write-Host "=== V8 sample build definitions ==="
-          Get-Content samples\SConscript
-
-          Write-Host "=== V8 sample source files ==="
-          Get-ChildItem samples -File |
-            Select-Object -ExpandProperty Name
 
       - name: Upload patch artifact
         uses: actions/upload-artifact@v4
