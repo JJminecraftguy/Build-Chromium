@@ -399,7 +399,11 @@ jobs:
         run: |
           Set-Location "chromium\build"
           $lines = @(
+            "import os",
             "build_component = ARGUMENTS.get('build_component', 'chrome')",
+            "msvc_bin = os.path.join(os.environ['MSVC_ROOT'], 'bin')",
+            "os.environ['PATH'] = msvc_bin + ';' + os.environ['PATH']",
+            "os.environ['VSINSTALLDIR'] = r'C:\Program Files\Microsoft Visual Studio 8'",
             "SConscript('SConscript.main', exports=['build_component'])"
           )
           [System.IO.File]::WriteAllLines("$PWD\SConstruct", $lines)
