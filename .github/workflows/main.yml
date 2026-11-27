@@ -43,7 +43,7 @@ jobs:
 
           # Run the installer silently (InstallShield)
           # -q = quiet, -params:ADDLOCAL=ALL = install all features
-          $proc = Start-Process -FilePath "${drive}:\Setup\Setup.Exe" `
+          $proc = Start-Process -FilePath "${drive}:\Setup.Exe" `
             -ArgumentList "-q -params:ADDLOCAL=ALL" -Wait -PassThru
           Write-Host "Setup exit code: $($proc.ExitCode)"
 
