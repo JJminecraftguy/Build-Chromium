@@ -5,9 +5,6 @@ jobs:
   fetch:
     runs-on: windows-latest
     steps:
-      - name: Setup SVN (for svndump fallback)
-        uses: AmpScm/setup-subversion@v1
-
       - name: Install Python 2.5.4
         run: |
           Start-BitsTransfer -Source "https://www.python.org/ftp/python/2.5.4/python-2.5.4.msi" -Destination "$env:RUNNER_TEMP\py254.msi"
@@ -15,40 +12,100 @@ jobs:
           echo "C:\Python25" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
           echo "C:\Python25\Scripts" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
         shell: powershell
-        
-      - name: Breakpad @ 2d7664e8 (pruned)
+
+      # --- Breakpad ---
+      - name: Restore Breakpad cache
+        id: breakpad-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: src/breakpad/src
+          key: breakpad-2d7664e8d477816e0641e822752f63982c1be74f
+
+      - name: Clone Breakpad (if not cached)
+        if: steps.breakpad-cache.outputs.cache-hit != 'true'
         run: |
           git clone --filter=blob:none --no-tags --single-branch -b main --no-checkout https://github.com/google/breakpad.git breakpad
           cd breakpad
           git checkout 2d7664e8d477816e0641e822752f63982c1be74f
-          git branch -f main 2d7664e8d477816e0641e822752f63982c1be74f
           git gc --aggressive --prune=now
-          Copy-Item -Recurse . ..\src\breakpad\src
+          Remove-Item -Recurse -Force .git
+          New-Item -ItemType Directory -Force -Path ..\src\breakpad
+          Move-Item -Path . -Destination ..\src\breakpad\src
         shell: powershell
 
-      - name: Googletest @ 26ddf828 (pruned)
+      - name: Save Breakpad cache
+        if: steps.breakpad-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: src/breakpad/src
+          key: breakpad-2d7664e8d477816e0641e822752f63982c1be74f
+
+      # --- Googletest ---
+      - name: Restore Googletest cache
+        id: gtest-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: src/testing/gtest
+          key: googletest-26ddf828fa2870982315f4dc8dd4f6e4777f4d29
+
+      - name: Clone Googletest (if not cached)
+        if: steps.gtest-cache.outputs.cache-hit != 'true'
         run: |
           git clone --filter=blob:none --no-tags --single-branch -b master --no-checkout https://github.com/stp/googletest.git googletest
           cd googletest
           git checkout 26ddf828fa2870982315f4dc8dd4f6e4777f4d29
-          git branch -f main 26ddf828fa2870982315f4dc8dd4f6e4777f4d29
           git gc --aggressive --prune=now
-          Copy-Item -Recurse . ..\src\testing\gtest
+          Remove-Item -Recurse -Force .git
+          New-Item -ItemType Directory -Force -Path ..\src\testing
+          Move-Item -Path . -Destination ..\src\testing\gtest
         shell: powershell
 
-      - name: V8 @ 4de96712 (pruned)
+      - name: Save Googletest cache
+        if: steps.gtest-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: src/testing/gtest
+          key: googletest-26ddf828fa2870982315f4dc8dd4f6e4777f4d29
+
+      # --- V8 ---
+      - name: Restore V8 cache
+        id: v8-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: src/v8
+          key: v8-4de96712f4295f4e5deaadc5d8a7429889eee00b
+
+      - name: Clone V8 (if not cached)
+        if: steps.v8-cache.outputs.cache-hit != 'true'
         run: |
           git clone --filter=blob:none --no-tags --single-branch -b main --no-checkout https://chromium.googlesource.com/v8/v8.git v8
           cd v8
           git checkout 4de96712f4295f4e5deaadc5d8a7429889eee00b
-          git branch -f main 4de96712f4295f4e5deaadc5d8a7429889eee00b
           git gc --aggressive --prune=now
-          Copy-Item -Recurse . ..\src\v8
+          Remove-Item -Recurse -Force .git
+          New-Item -ItemType Directory -Force -Path ..\src
+          Move-Item -Path . -Destination ..\src\v8
         shell: powershell
 
-      - name: WebKit LayoutTests @ Safari-3-1-branch r31256
+      - name: Save V8 cache
+        if: steps.v8-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: src/v8
+          key: v8-4de96712f4295f4e5deaadc5d8a7429889eee00b
+
+      # --- WebKit LayoutTests ---
+      - name: Restore WebKit cache
+        id: webkit-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: src/webkit/data/layout_tests
+          key: webkit-safari31-r31256
+
+      - name: Clone WebKit (if not cached)
+        if: steps.webkit-cache.outputs.cache-hit != 'true'
         run: |
-          git clone --filter=blob:none --no-tags --single-branch -b Safari-3-1-branch --no-checkout https://webkit.googlesource.com/WebKit WebKit
+          git clone --filter=blob:none --no-tags --single-branch -b Safari-3-1-branch --no-checkout https://chromium.googlesource.com/external/Webkit WebKit
           cd WebKit
           $found = @(git log --all --grep="git-svn-id.*@31256 " --format="%H %ad" --date=short)
           Write-Host ">>> WebKit: $($found.Count) match(es)"
@@ -56,31 +113,75 @@ jobs:
           $commit = ($found[0] -split ' ')[0]
           Write-Host ">>> Checking out: $commit"
           git checkout $commit
-          git branch -f main $commit
           git gc --aggressive --prune=now
-          Copy-Item -Recurse "LayoutTests" ..\src\webkit\data\layout_tests
+          Remove-Item -Recurse -Force .git
+          New-Item -ItemType Directory -Force -Path ..\src\webkit\data
+          Move-Item -Path .\LayoutTests -Destination ..\src\webkit\data\layout_tests
         shell: powershell
 
-      - name: Google URL @ SVN r92 (svndump fallback)
+      - name: Save WebKit cache
+        if: steps.webkit-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: src/webkit/data/layout_tests
+          key: webkit-safari31-r31256
+
+      # --- Google URL (svndump, no git) ---
+      - name: Restore Google URL cache
+        id: googleurl-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: src/googleurl
+          key: googleurl-r92
+
+      - name: Setup SVN
+        if: steps.googleurl-cache.outputs.cache-hit != 'true'
+        uses: AmpScm/setup-subversion@v1
+
+      - name: Fetch Google URL (if not cached)
+        if: steps.googleurl-cache.outputs.cache-hit != 'true'
         run: |
           Invoke-WebRequest -Uri "https://storage.googleapis.com/google-code-archive-source/v2/code.google.com/google-url/repo.svndump.gz" -OutFile "$env:RUNNER_TEMP\google-url.svndump.gz"
           7z x "$env:RUNNER_TEMP\google-url.svndump.gz" -o"$env:RUNNER_TEMP" -y
           svnadmin create "$env:RUNNER_TEMP\google-url-svn"
           svnadmin load "$env:RUNNER_TEMP\google-url-svn" < "$env:RUNNER_TEMP\google-url.svndump"
+          New-Item -ItemType Directory -Force -Path src
           svn checkout "file:///$($env:RUNNER_TEMP.Replace('\','/'))/google-url-svn/trunk@92" src\googleurl
         shell: powershell
 
-      - name: Chromium trunk deps (icu38@1227, WebKit@19)
+      - name: Save Google URL cache
+        if: steps.googleurl-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: src/googleurl
+          key: googleurl-r92
+
+      # --- Chromium icu38 ---
+      - name: Restore Chromium icu38 cache
+        id: icu-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: src/third_party/icu38
+          key: chromium-icu38-r1227
+
+      - name: Fetch Chromium icu38 (if not cached)
+        if: steps.icu-cache.outputs.cache-hit != 'true'
         run: |
-          git clone --filter=blob:none --no-tags --no-checkout https://chromium.googlesource.com/chromium/src.git src
-          cd src
+          git clone --filter=blob:none --no-tags --no-checkout https://chromium.googlesource.com/chromium/src.git chromium-src
+          cd chromium-src
           $found = @(git log --all --grep="git-svn-id.*@1227 " --format="%H %ad" --date=short -- third_party/icu38)
           Write-Host ">>> Chromium icu38: $($found.Count) match(es)"
           foreach ($m in $found) { Write-Host "    $m" }
           $commit = ($found[0] -split ' ')[0]
           Write-Host ">>> Checking out: $commit"
           git checkout $commit -- third_party/icu38
-          git branch -f main $commit
-          git gc --aggressive --prune=now
-          Copy-Item -Recurse third_party\icu38 ..\..\src\third_party\icu38
+          New-Item -ItemType Directory -Force -Path ..\src\third_party
+          Move-Item -Path .\third_party\icu38 -Destination ..\src\third_party\icu38
         shell: powershell
+
+      - name: Save Chromium icu38 cache
+        if: steps.icu-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: src/third_party/icu38
+          key: chromium-icu38-r1227
