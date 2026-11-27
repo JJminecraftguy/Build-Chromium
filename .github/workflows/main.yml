@@ -258,7 +258,7 @@ jobs:
       - name: Install ICU Unicode headers
         shell: pwsh
         run: |
-          $icuRoot = "$env:GITHUB_WORKSPACE\src\third_party\icu38"
+          $icuRoot = "$env:GITHUB_WORKSPACE\chromium\third_party\icu38"
           $unicodeDir = "$icuRoot\public\common\unicode"
           $zip = "$env:RUNNER_TEMP\unicode.zip"
 
@@ -277,14 +277,12 @@ jobs:
             throw "Failed to extract unicode.zip"
           }
 
-          Remove-Item $zip -Force
-
           if (-not (Test-Path "$unicodeDir\ucnv.h")) {
-            throw "unicode.zip extraction failed: ucnv.h not found"
+            throw "ucnv.h was not installed correctly"
           }
 
-          Write-Host "ICU Unicode headers installed."
-          Write-Host "ucnv.h: $unicodeDir\ucnv.h"
+          Write-Host "ICU Unicode headers installed:"
+          Write-Host "$unicodeDir\ucnv.h"
           Write-Host "Header count: $((Get-ChildItem $unicodeDir -Filter '*.h' -File).Count)"
 
 
