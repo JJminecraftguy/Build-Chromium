@@ -407,25 +407,39 @@ jobs:
           }
           Set-Content $f $content -NoNewline
 
-          $file = "build\SConscript.v8"
+          $file = Join-Path $env:GITHUB_WORKSPACE "chromium\build\SConscript.v8"
+
+          Write-Host "Looking for: $file"
+
+          if (-not (Test-Path $file)) {
+            Write-Host "Chromium directory contents:"
+            Get-ChildItem $env:GITHUB_WORKSPACE
+            throw "SConscript.v8 was not found at $file"
+          }
+
           $content = [System.IO.File]::ReadAllText($file)
 
           $old = "SCONSFLAGS='-Q --warn=no-deprecated')"
           $new = "SCONSFLAGS='-Q --warn=no-deprecated os=win32')"
 
-          if (-not $content.Contains($old)) {
-            throw "Could not find expected V8 SConsFLAGS"
+          if ($content.Contains($new)) {
+            Write-Host "V8 OS argument already patched."
+          }
+          elseif ($content.Contains($old)) {
+            $content = $content.Replace($old, $new)
+
+            [System.IO.File]::WriteAllText(
+              $file,
+              $content,
+              [System.Text.UTF8Encoding]::new($false)
+            )
+
+            Write-Host "Successfully patched V8 SCons."
+          }
+          else {
+            throw "Could not find expected SCONSFLAGS in SConscript.v8"
           }
 
-          $content = $content.Replace($old, $new)
-
-          [System.IO.File]::WriteAllText(
-            $file,
-            $content,
-            [System.Text.UTF8Encoding]::new($false)
-          )
-
-          Write-Host "Updated V8 SCons arguments:"
           Select-String -Path $file -Pattern "SCONSFLAGS"
 
           & "C:\Program Files\Git\bin\git.exe" diff > "$env:GITHUB_WORKSPACE\patch.patch"
