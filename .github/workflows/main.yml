@@ -344,16 +344,31 @@ jobs:
       - name: Apply source patches
         shell: pwsh
         run: |
-          curl.exe -L -o "$env:RUNNER_TEMP\patch.patch" `
-            "https://raw.githubusercontent.com/JJminecraftguy/Build-Chromium/main/patch.patch"
-
           Set-Location "$env:GITHUB_WORKSPACE\chromium"
-          & "C:\Program Files\Git\bin\git.exe" apply --verbose "$env:RUNNER_TEMP\patch.patch"
-          if ($LASTEXITCODE -ne 0) {
-            Write-Error "Patch failed"
-            exit $LASTEXITCODE
+
+          # Patch 1: build_component fallback
+          $f = "build\SConscript.main"
+          $lines = Get-Content $f
+          for ($i = 0; $i -lt $lines.Count; $i++) {
+            if ($lines[$i] -match "^Import\('build_component'\)$") {
+              $lines[$i] = "if 'build_component' not in globals():`n    build_component = 'chrome'`nImport('build_component')"
+              break
+            }
           }
-          Write-Host "Patch applied"
+          Set-Content $f $lines -NoNewline
+
+          # Add more patches here as needed...
+
+          # Generate the patch from the diff
+          & "C:\Program Files\Git\bin\git.exe" diff > "$env:GITHUB_WORKSPACE\patch.patch"
+          Write-Host "Generated patch:"
+          Get-Content "$env:GITHUB_WORKSPACE\patch.patch"
+
+      - name: Upload patch artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: patch.patch
+          path: patch.patch
 
       - name: Verify Python 2.4
         shell: pwsh
