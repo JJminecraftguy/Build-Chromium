@@ -407,6 +407,27 @@ jobs:
           }
           Set-Content $f $content -NoNewline
 
+          $file = "build\SConscript.v8"
+          $content = [System.IO.File]::ReadAllText($file)
+
+          $old = "SCONSFLAGS='-Q --warn=no-deprecated')"
+          $new = "SCONSFLAGS='-Q --warn=no-deprecated os=win32')"
+
+          if (-not $content.Contains($old)) {
+            throw "Could not find expected V8 SConsFLAGS"
+          }
+
+          $content = $content.Replace($old, $new)
+
+          [System.IO.File]::WriteAllText(
+            $file,
+            $content,
+            [System.Text.UTF8Encoding]::new($false)
+          )
+
+          Write-Host "Updated V8 SCons arguments:"
+          Select-String -Path $file -Pattern "SCONSFLAGS"
+
           & "C:\Program Files\Git\bin\git.exe" diff > "$env:GITHUB_WORKSPACE\patch.patch"
           Write-Host "Generated patch:"
           Get-Content "$env:GITHUB_WORKSPACE\patch.patch"
