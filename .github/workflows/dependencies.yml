@@ -166,16 +166,6 @@ jobs:
           Write-Host "=== All directories (depth 2) ==="
           Get-ChildItem "$env:RUNNER_TEMP\icu" -Recurse -Directory -Depth 2 | ForEach-Object { Write-Host $_.FullName.Replace("$env:RUNNER_TEMP\icu\", "") }
           $sourceDir = Get-ChildItem "$env:RUNNER_TEMP\icu" -Recurse -Directory -Filter "source" | Select-Object -First 1
-          if (-not $sourceDir) { throw "Could not find 'source' directory in extracted ICU" }
-          Write-Host ">>> Found source at: $($sourceDir.FullName)"
-
-          # Create the structure the SCons build expects
-          New-Item -ItemType Directory -Force -Path src\third_party\icu38\public
-          # public/ = headers only (what other Chromium code includes)
-          Copy-Item -Recurse "$($sourceDir.FullName)\common" src\third_party\icu38\public\common
-          Copy-Item -Recurse "$($sourceDir.FullName)\i18n" src\third_party\icu38\public\i18n
-          # source/ = full source tree
-          Move-Item -Path $sourceDir.FullName -Destination src\third_party\icu38\source
 
           # Get the scons build script (o3d derivative of the original icu38_main.scons)
           curl.exe -L -o "$env:RUNNER_TEMP\icu38_main.b64" "https://chromium.googlesource.com/chromium/src/+/refs/tags/4.0.212.1/o3d/base/icu38_o3d.scons?format=TEXT"
