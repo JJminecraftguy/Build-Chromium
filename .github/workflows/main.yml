@@ -693,6 +693,10 @@ jobs:
             "          '`$ICU38_DIR/public/i18n',",
             "          '`$ICU38_DIR/source/common',",
             "          '`$ICU38_DIR/source/i18n',",
+            "          os.path.join(os.environ.get('MSVC_ATLMFC_ROOT', ''), 'include'),",
+            "      ],",
+            "      LIBPATH = [",
+            "          os.path.join(os.environ.get('MSVC_ATLMFC_ROOT', ''), 'lib'),",
             "      ],",
             "  )",
             ""
@@ -710,10 +714,10 @@ jobs:
               $icuPatch + $icuAnchor
             )
 
-            Write-Host "Applied ICU include path patch."
+            Write-Host "Applied ICU and ATL/MFC include path patch."
           }
           else {
-            Write-Host "ICU include path patch already exists."
+            Write-Host "ICU and ATL/MFC include path patch already exists."
           }
 
           # ============================================================
