@@ -731,22 +731,28 @@ jobs:
           [System.IO.File]::WriteAllLines("$PWD\SConstruct", $lines)
           Get-Content "SConstruct"
           
-
-      - name: Diagnose SCons clobber options
+      - name: Verify MSVC ATL headers
         shell: pwsh
         run: |
-          Set-Location "$env:GITHUB_WORKSPACE\chromium"
+          $atlDir = "$env:MSVC_ROOT\atlmfc\include"
+          $atlHeader = "$atlDir\atlbase.h"
 
-          Write-Host "=== Find clobber registrations ==="
+          Write-Host "MSVC_ROOT: $env:MSVC_ROOT"
+          Write-Host "ATL directory: $atlDir"
 
-          Get-ChildItem build,v8 -Recurse -File |
-            Where-Object {
-              $_.Extension -in ".py", ".scons"
-            } |
-            Select-String -Pattern "clobber|AddOption|add_local_option" |
-            ForEach-Object {
-              Write-Host "$($_.Path):$($_.LineNumber): $($_.Line.Trim())"
-            }
+          if (-not (Test-Path $atlDir)) {
+              throw "ATL include directory does not exist: $atlDir"
+          }
+
+          if (-not (Test-Path $atlHeader)) {
+              Write-Host "Searching for atlbase.h..."
+              Get-ChildItem $env:MSVC_ROOT -Filter atlbase.h -Recurse -ErrorAction SilentlyContinue |
+                  Select-Object -ExpandProperty FullName
+
+              throw "atlbase.h is missing from the MSVC installation"
+          }
+
+          Write-Host "atlbase.h exists."
 
       - name: Build Chromium
         shell: pwsh
