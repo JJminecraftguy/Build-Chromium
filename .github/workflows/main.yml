@@ -345,21 +345,21 @@ jobs:
           Write-Host "SCons at: $(Resolve-Path $scons.FullName)"
           
       # ── 8. Build ───────────────────────────────────────────────
+      - name: Create SConstruct wrapper
+        shell: pwsh
+        run: |
+          Set-Location "chromium"
+          @"
+          SConscript('build/SConscript.main')
+          "@ | Out-File -FilePath "SConstruct" -Encoding ascii
+
       - name: Build Chromium
         shell: pwsh
         run: |
-          # Set the working directory to the chromium source root
+          $py = Resolve-Path "$env:PYTHON"
+          $scons = Resolve-Path "$env:SCONS_PY"
           Set-Location "chromium"
-
-          # Run SCons with the vendored Python
-          # -j4 = 4 parallel jobs
-          # --debug=explain = show why files are rebuilt
-          & $env:PYTHON $env:SCONS_PY -j4 --debug=explain
+          & $py $scons -j4
           if ($LASTEXITCODE -ne 0) {
-            Write-Error "Build failed with exit code $LASTEXITCODE"
             exit $LASTEXITCODE
-          }
-          Write-Host "Build complete!"
-          Get-ChildItem "out" -Recurse -Filter "chrome.exe" -ErrorAction SilentlyContinue | ForEach-Object {
-            Write-Host "  $($_.FullName) ($([math]::Round($_.Length/1MB,1)) MB)"
           }
