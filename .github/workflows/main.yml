@@ -500,6 +500,40 @@ jobs:
             "SCONSFLAGS='-Q --warn=no-deprecated os=win32 mode=debug,release snapshot=on sample=shell'"
           )
 
+          # Patch Chromium's main SCons environment to include ICU 3.8.1 headers.
+          $f = "build\SConscript.main"
+          $content = Get-Content $f -Raw
+
+          $icuAnchor = "  # Force scons to handle long include lines correctly."
+
+          $icuPatchLines = @(
+            "  # Add ICU 3.8.1 public headers to Chromium's compiler include paths.",
+            "  env.Prepend(",
+            "      CPPPATH = [",
+            "          '`$ICU38_DIR/public/common',",
+            "          '`$ICU38_DIR/public/i18n',",
+            "          '`$ICU38_DIR/source/common',",
+            "          '`$ICU38_DIR/source/i18n',",
+            "      ],",
+            "  )",
+            ""
+          )
+
+          $icuPatch = $icuPatchLines -join "`r`n"
+
+          if (-not $content.Contains("Add ICU 3.8.1 public headers")) {
+            if (-not $content.Contains($icuAnchor)) {
+              throw "Could not find ICU patch anchor in SConscript.main"
+            }
+
+            $content = $content.Replace($icuAnchor, $icuPatch + $icuAnchor)
+            Set-Content $f $content -NoNewline
+
+            Write-Host "Applied Chromium ICU include path patch."
+          } else {
+            Write-Host "Chromium ICU include path patch already exists."
+          }
+
           # Add a diagnostic before launching nested V8 SCons.
           $oldCommand = 'cd ..\\v8 && $PYTHON $SCONS $SCONSFLAGS ${TARGETS[:-1]}'
           $newCommand = 'cd ..\\v8 && where cl && $PYTHON $SCONS $SCONSFLAGS ${TARGETS[:-1]}'
