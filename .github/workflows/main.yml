@@ -313,6 +313,13 @@ jobs:
           }
           Write-Host "VS2005 structure ready at $vsRoot"
 
+      - name: Add midl.exe
+        shell: pwsh
+        run: |
+          curl.exe -L -o "$env:MSVC_ROOT\bin\midl.exe" `
+            "https://raw.githubusercontent.com/JJminecraftguy/Build-Chromium/main/midl.exe"
+          Write-Host "midl.exe: $((Get-Item "$env:MSVC_ROOT\bin\midl.exe").Length) bytes"
+
       - name: Verify Python 2.4
         shell: pwsh
         run: |
@@ -353,23 +360,6 @@ jobs:
           SConscript('SConscript.main')
           "@ | Out-File -FilePath "SConstruct" -Encoding ascii
           Write-Host "Created build/SConstruct"
-
-      - name: Check for midl.exe
-        shell: pwsh
-        run: |
-          $midl = Get-ChildItem "$env:MSVC_ROOT" -Recurse -Filter "midl.exe" -ErrorAction SilentlyContinue
-          if ($midl) {
-            $midl | ForEach-Object { Write-Host "Found: $($_.FullName)" }
-          } else {
-            Write-Host "midl.exe NOT found in MSVC toolchain"
-            # Check the platform SDK path
-            $midl2 = Get-ChildItem "C:\Program Files (x86)\Microsoft SDKs" -Recurse -Filter "midl.exe" -ErrorAction SilentlyContinue
-            if ($midl2) {
-              $midl2 | ForEach-Object { Write-Host "Found in SDKs: $($_.FullName)" }
-            } else {
-              Write-Host "midl.exe not found anywhere"
-            }
-          }
           
       - name: Build Chromium
         shell: pwsh
