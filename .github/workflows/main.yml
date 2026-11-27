@@ -292,14 +292,76 @@ jobs:
           Get-Content "chromium\chrome\VERSION" -ErrorAction SilentlyContinue
           Get-ChildItem "chromium" -Name | Select-Object -First 20
 
-      # ── 7. Build ───────────────────────────────────────────────
-      - name: Build (placeholder)
+      # ── 7. Setup build environment ─────────────────────────────
+      - name: Setup VS2005 directory structure
         shell: pwsh
         run: |
-          Write-Host "TODO: add build steps"
-          # The SConscript expects:
-          #   - PLATFORMSDK_6_1 → set above (points to sdk-v6.1/)
-          #   - MSVS_VERSION = '8.0' (set by SConscript.main)
-          #   - Visual Studio at C:\Program Files (x86)\Microsoft Visual Studio 8
-          #   - Python 2.4 from chromium/third_party/python_24
-          #   - All deps under src/ (breakpad, gtest, v8, icu38, googleurl, webkit)
+          # SCons' MSVS tool expects: C:\Program Files (x86)\Microsoft Visual Studio 8\VC\{bin,include,lib}
+          # setup-msvc put them at: $MSVC_ROOT\{bin,include,lib}
+          $vsRoot = "C:\Program Files (x86)\Microsoft Visual Studio 8"
+          $vcDir  = "$vsRoot\VC"
+
+          New-Item -ItemType Directory -Force -Path $vcDir | Out-Null
+          New-Item -ItemType Junction -Path "$vcDir\bin"     -Target "$env:MSVC_ROOT\bin"     -Force
+          New-Item -ItemType Junction -Path "$vcDir\include" -Target "$env:MSVC_ROOT\include" -Force
+          New-Item -ItemType Junction -Path "$vcDir\lib"     -Target "$env:MSVC_ROOT\lib"     -Force
+
+          # Verify
+          if (-not (Test-Path "$vcDir\bin\cl.exe")) {
+            Write-Error "cl.exe not found at $vcDir\bin\cl.exe"
+            exit 1
+          }
+          Write-Host "VS2005 structure ready at $vsRoot"
+
+      - name: Verify Python 2.4
+        shell: pwsh
+        run: |
+          $py = "chromium\third_party\python_24\python.exe"
+          if (-not (Test-Path $py)) {
+            # Try alternate layout
+            $py = Get-ChildItem "chromium\third_party\python_24" -Recurse -Filter "python.exe" | Select-Object -First 1
+            if (-not $py) {
+              Write-Error "python.exe not found in chromium\third_party\python_24"
+              exit 1
+            }
+            $py = $py.FullName
+          }
+          & $py --version
+          echo "PYTHON=$py" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          Write-Host "Python at: $py"
+
+      - name: Verify SCons
+        shell: pwsh
+        run: |
+          # SCons is vendored in the repo
+          $scons = Get-ChildItem "chromium\third_party\scons" -Recurse -Filter "scons.py" -ErrorAction SilentlyContinue | Select-Object -First 1
+          if (-not $scons) {
+            # Try other locations
+            $scons = Get-ChildItem "chromium" -Recurse -Filter "scons.py" -Depth 3 -ErrorAction SilentlyContinue | Select-Object -First 1
+          }
+          if (-not $scons) {
+            Write-Error "scons.py not found in chromium tree"
+            exit 1
+          }
+          echo "SCONS_PY=$($scons.FullName)" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          Write-Host "SCons at: $($scons.FullName)"
+
+      # ── 8. Build ───────────────────────────────────────────────
+      - name: Build Chromium
+        shell: pwsh
+        run: |
+          # Set the working directory to the chromium source root
+          Set-Location "chromium"
+
+          # Run SCons with the vendored Python
+          # -j4 = 4 parallel jobs
+          # --debug=explain = show why files are rebuilt
+          & $env:PYTHON $env:SCONS_PY -j4 --debug=explain
+          if ($LASTEXITCODE -ne 0) {
+            Write-Error "Build failed with exit code $LASTEXITCODE"
+            exit $LASTEXITCODE
+          }
+          Write-Host "Build complete!"
+          Get-ChildItem "out" -Recurse -Filter "chrome.exe" -ErrorAction SilentlyContinue | ForEach-Object {
+            Write-Host "  $($_.FullName) ($([math]::Round($_.Length/1MB,1)) MB)"
+          }
