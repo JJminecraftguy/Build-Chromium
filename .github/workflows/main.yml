@@ -454,30 +454,12 @@ jobs:
         run: |
           Set-Location "chromium\build"
           $lines = @(
-            "import os",
             "build_component = ARGUMENTS.get('build_component', 'chrome')",
-            "msvc_bin = os.path.join(os.environ['MSVC_ROOT'], 'bin')",
-            "os.environ['PATH'] = msvc_bin + ';' + os.environ['PATH']",
-            "os.environ['VSINSTALLDIR'] = r'C:\Program Files\Microsoft Visual Studio 8'",
+            "ARGUMENTS['os'] = 'win32'",
             "SConscript('SConscript.main', exports=['build_component'])"
           )
           [System.IO.File]::WriteAllLines("$PWD\SConstruct", $lines)
           Get-Content "SConstruct"
-
-      - name: Check for windows.h
-        shell: pwsh
-        run: |
-          $sdkInc = "$env:MSVC_ROOT\platform_sdk_include"
-          Write-Host "platform_sdk_include: $sdkInc"
-          Write-Host "Exists: $(Test-Path $sdkInc)"
-          $wh = Get-ChildItem $sdkInc -Filter "windows.h" -Recurse -ErrorAction SilentlyContinue
-          if ($wh) {
-            Write-Host "Found: $($wh.FullName)"
-          } else {
-            Write-Host "windows.h NOT in platform_sdk_include"
-            Write-Host "Top-level contents:"
-            Get-ChildItem $sdkInc -Depth 0 | Select-Object -First 20 | ForEach-Object { Write-Host "  $($_.Name)" }
-          }
 
       - name: Build Chromium
         shell: pwsh
