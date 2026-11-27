@@ -391,4 +391,4 @@ jobs:
           & $py $scons -j4 build_component=chrome
           if ($LASTEXITCODE -ne 0) {
             exit $LASTEXITCODE
-          }
+          } 
