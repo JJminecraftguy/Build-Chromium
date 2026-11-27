@@ -390,7 +390,7 @@ jobs:
           $msvcRoot = $env:MSVC_ROOT
           $insertLines = @(
             "  # Force MSVC 2005 paths into SCons subprocess environment",
-            "  "_msvc_bin = r'$msvcRoot\bin'",
+            "  _msvc_bin = r'$msvcRoot\bin'",
             "  _msvc_inc = r'$msvcRoot\include'",
             "  _msvc_lib = r'$msvcRoot\lib'",
             "  _sdk_inc  = r'$msvcRoot\platform_sdk_include'",
