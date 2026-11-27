@@ -354,6 +354,14 @@ jobs:
           "@ | Out-File -FilePath "SConstruct" -Encoding ascii
           Write-Host "Created build/SConstruct"
 
+      - name: Find TypeLibrary definition
+        shell: pwsh
+        run: |
+          Set-Location "chromium"
+          $hits = Get-ChildItem "build","chrome" -Recurse -Include "*.py","SConscript*" -ErrorAction SilentlyContinue |
+            Select-String -Pattern "TypeLibrary" -SimpleMatch
+          $hits | ForEach-Object { Write-Host "$($_.Path.Replace((Get-Location).Path + '\','')):$($_.LineNumber): $($_.Line.Trim())" }
+
       - name: Build Chromium
         shell: pwsh
         run: |
