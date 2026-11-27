@@ -378,6 +378,7 @@ jobs:
 
 
 
+
       - name: Apply source patches
         shell: pwsh
         run: |
@@ -388,6 +389,10 @@ jobs:
           $content = Get-Content $f -Raw
 
           $msvcRoot = $env:MSVC_ROOT
+          if (-not $msvcRoot) {
+            throw "MSVC_ROOT is not set"
+          }
+
           $insertLines = @(
             "  # Force MSVC 2005 paths into SCons subprocess environment",
             "  _msvc_bin = r'$msvcRoot\bin'",
@@ -416,7 +421,6 @@ jobs:
           }
 
           # Patch Chromium's V8 SCons invocation.
-       
           $file = Join-Path $env:GITHUB_WORKSPACE "chromium\build\SConscript.v8"
 
           if (-not (Test-Path $file)) {
@@ -425,7 +429,32 @@ jobs:
 
           $content = [System.IO.File]::ReadAllText($file)
 
-          # Correct V8 output paths and build the shell sample.
+          # Add MSVC compiler path to the V8 subprocess environment.
+          # Insert after Import('env'), avoiding assumptions about env.Clone().
+          $anchor = "Import('env')"
+
+          $msvcPatch = @'
+          Import('env')
+
+          import os
+          _msvc_root = os.environ.get('MSVC_ROOT')
+          if _msvc_root:
+            _msvc_bin = os.path.join(_msvc_root, 'bin')
+            env['ENV']['PATH'] = _msvc_bin + os.pathsep + env['ENV'].get('PATH', os.environ.get('PATH', ''))
+          '@
+
+          if (-not $content.Contains("_msvc_root = os.environ.get('MSVC_ROOT')")) {
+            if (-not $content.Contains($anchor)) {
+              throw "Could not find Import('env') in SConscript.v8"
+            }
+
+            $content = $content.Replace($anchor, $msvcPatch.Trim())
+            Write-Host "Applied V8 MSVC PATH patch."
+          } else {
+            Write-Host "V8 MSVC PATH patch already exists."
+          }
+
+          # Correct V8 output paths.
           $content = $content.Replace(
             "File('#/../v8/bin/debug/mksnapshot.exe')",
             "File('#/../v8/obj/debug/mksnapshot.exe')"
@@ -449,7 +478,6 @@ jobs:
           # Request the shell sample and both debug/release outputs.
           $oldFlags = "SCONSFLAGS='-Q --warn=no-deprecated')"
           $debugFlags = "SCONSFLAGS='-Q --warn=no-deprecated os=win32 mode=debug snapshot=on sample=shell')"
-
           $oldPatchedFlags = "SCONSFLAGS='-Q --warn=no-deprecated os=win32 mode=debug snapshot=on')"
 
           if ($content.Contains($oldFlags)) {
@@ -462,11 +490,22 @@ jobs:
             throw "Could not find expected SCONSFLAGS in SConscript.v8"
           }
 
-          # The shell sample is built in release mode, so build both modes.
           $content = $content.Replace(
             "SCONSFLAGS='-Q --warn=no-deprecated os=win32 mode=debug snapshot=on sample=shell'",
             "SCONSFLAGS='-Q --warn=no-deprecated os=win32 mode=debug,release snapshot=on sample=shell'"
           )
+
+          # Add a diagnostic before launching nested V8 SCons.
+          $oldCommand = "'cd ..\\v8 && $PYTHON $SCONS $SCONSFLAGS ${TARGETS[:-1]}'"
+          $newCommand = "'cd ..\\v8 && where cl && $PYTHON $SCONS $SCONSFLAGS ${TARGETS[:-1]}'"
+
+          if ($content.Contains($oldCommand)) {
+            $content = $content.Replace($oldCommand, $newCommand)
+            Write-Host "Added V8 compiler diagnostic."
+          }
+          elseif (-not $content.Contains("where cl &&")) {
+            throw "Could not find expected nested V8 SCons command"
+          }
 
           [System.IO.File]::WriteAllText(
             $file,
@@ -482,6 +521,7 @@ jobs:
 
           Write-Host "=== Generated patch ==="
           Get-Content "$env:GITHUB_WORKSPACE\patch.patch"
+
 
       - name: Upload patch artifact
         uses: actions/upload-artifact@v4
