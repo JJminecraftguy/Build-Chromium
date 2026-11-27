@@ -155,24 +155,21 @@ jobs:
           7z x "$env:RUNNER_TEMP\icu4c-3_8_1-src.tgz" -o"$env:RUNNER_TEMP\icu" -y
           7z x "$env:RUNNER_TEMP\icu\icu4c-3_8_1-src.tar" -o"$env:RUNNER_TEMP\icu" -y
 
-          curl.exe -L -o "$env:RUNNER_TEMP\icu4c-3_8_1-data.tgz" "https://downloads.sourceforge.net/project/icu/ICU4C/3.8.1/icu4c-3_8_1-data.tgz"
-          7z x "$env:RUNNER_TEMP\icu4c-3_8_1-data.tgz" -o"$env:RUNNER_TEMP\icu-data" -y
-          7z x "$env:RUNNER_TEMP\icu-data\icu4c-3_8_1-data.tar" -o"$env:RUNNER_TEMP\icu-data" -y
-
           $src = "$env:RUNNER_TEMP\icu\icu\source"
           New-Item -ItemType Directory -Force -Path src\third_party\icu38\public
           Copy-Item -Recurse "$src\common" src\third_party\icu38\public\common
           Copy-Item -Recurse "$src\i18n" src\third_party\icu38\public\i18n
           Move-Item -Path $src -Destination src\third_party\icu38\source
 
-          # Copy prebuilt data file
-          Copy-Item "$env:RUNNER_TEMP\icu-data\icu\source\data\in\icudt38l.dat" "src\third_party\icu38\source\data\in\icudt38l.dat"
+          # Verify the .dat file is present (it's in the source tarball)
+          if (-not (Test-Path "src\third_party\icu38\source\data\in\icudt38l.dat")) {
+            throw "icudt38l.dat not found in source tree"
+          }
+          Write-Host ">>> icudt38l.dat present: $((Get-Item 'src\third_party\icu38\source\data\in\icudt38l.dat').Length) bytes"
 
-          # Copy the scons file from repo root
           Copy-Item "icu38_main.scons" "src\third_party\icu38\icu38_main.scons"
 
           Remove-Item -Recurse -Force "$env:RUNNER_TEMP\icu"
-          Remove-Item -Recurse -Force "$env:RUNNER_TEMP\icu-data"
         shell: powershell
 
       - name: Save ICU cache
