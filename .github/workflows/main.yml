@@ -303,15 +303,34 @@ jobs:
           # perl from Git for Windows
           Copy-Item "C:\Program Files\Git\usr\bin\perl.exe" "third_party\cygwin\bin\perl.exe"
 
-          # bison from winflexbison (Windows port)
+          Write-Host "perl: $((Get-Item 'third_party\cygwin\bin\perl.exe').Length) bytes"
+
+      - name: Cache bison
+        id: bison-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: chromium/third_party/cygwin/bin/bison.exe
+          key: winflexbison-2.5.24
+
+      - name: Download bison (if not cached)
+        if: steps.bison-cache.outputs.cache-hit != 'true'
+        shell: pwsh
+        run: |
+          Set-Location "$env:GITHUB_WORKSPACE\chromium"
+          New-Item -ItemType Directory -Force -Path "third_party\cygwin\bin" | Out-Null
           Start-Sleep -Seconds 6
           curl.exe -L -o "$env:RUNNER_TEMP\winflexbison.zip" `
             "https://downloads.sourceforge.net/project/winflexbison/old_versions/win_flex_bison-2.5.24.zip"
           7z x "$env:RUNNER_TEMP\winflexbison.zip" "bison.exe" -o"third_party\cygwin\bin" -y
           Remove-Item "$env:RUNNER_TEMP\winflexbison.zip" -Force
-
-          Write-Host "perl: $((Get-Item 'third_party\cygwin\bin\perl.exe').Length) bytes"
           Write-Host "bison: $((Get-Item 'third_party\cygwin\bin\bison.exe').Length) bytes"
+
+      - name: Save bison cache
+        if: steps.bison-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: chromium/third_party/cygwin/bin/bison.exe
+          key: winflexbison-2.5.24
 
       # ── 7. Setup build environment ─────────────────────────────
       - name: Setup VS2005 directory structure
