@@ -359,10 +359,10 @@ jobs:
         shell: pwsh
         run: |
           $binDir = "C:\Program Files\Microsoft Visual Studio 8\VC\bin"
-          Write-Host "Contents of $binDir:"
+          Write-Host "Contents of ${binDir}:"
           Get-ChildItem $binDir | ForEach-Object { Write-Host "  $($_.Name) ($([math]::Round($_.Length/1KB)) KB)" }
-          
-          Write-Host "`nRunning cl /?:"
+          Write-Host ""
+          Write-Host "Running cl /?:"
           & "$binDir\cl.exe" /? 2>&1 | Select-Object -First 5
           Write-Host "Exit: $LASTEXITCODE"
 
