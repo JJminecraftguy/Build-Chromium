@@ -496,15 +496,20 @@ jobs:
           )
 
           # Add a diagnostic before launching nested V8 SCons.
-          $oldCommand = "'cd ..\\v8 && $PYTHON $SCONS $SCONSFLAGS ${TARGETS[:-1]}'"
-          $newCommand = "'cd ..\\v8 && where cl && $PYTHON $SCONS $SCONSFLAGS ${TARGETS[:-1]}'"
+          $oldCommand = 'cd ..\\v8 && $PYTHON $SCONS $SCONSFLAGS ${TARGETS[:-1]}'
+          $newCommand = 'cd ..\\v8 && where cl && $PYTHON $SCONS $SCONSFLAGS ${TARGETS[:-1]}'
 
           if ($content.Contains($oldCommand)) {
             $content = $content.Replace($oldCommand, $newCommand)
             Write-Host "Added V8 compiler diagnostic."
           }
-          elseif (-not $content.Contains("where cl &&")) {
-            throw "Could not find expected nested V8 SCons command"
+          elseif ($content.Contains('where cl &&')) {
+            Write-Host "V8 compiler diagnostic already exists."
+          }
+          else {
+            Write-Host "Actual V8 SCons command:"
+            $content -split "`r?`n" | Where-Object { $_ -match 'SCONSFLAGS|TARGETS' }
+            throw "Could not find expected nested V8 SCons command."
           }
 
           [System.IO.File]::WriteAllText(
