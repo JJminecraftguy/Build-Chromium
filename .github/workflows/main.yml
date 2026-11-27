@@ -24,35 +24,6 @@ jobs:
       - name: Verify compiler
         shell: pwsh
         run: cl.exe /?
-
-      - name: Setup in-tree SDK and Cygwin paths
-        shell: pwsh
-        run: |
-          Set-Location "chromium"
-
-          # Create the expected SDK layout using junctions to setup-msvc toolchain
-          $sdkBase = "third_party\platformsdk_vista_6_0\files"
-          New-Item -ItemType Directory -Force -Path "$sdkBase\VC" | Out-Null
-
-          New-Item -ItemType Junction -Path "$sdkBase\Include" -Target "$env:MSVC_ROOT\platform_sdk_include" -Force
-          New-Item -ItemType Junction -Path "$sdkBase\VC\INCLUDE" -Target "$env:MSVC_ROOT\platform_sdk_include" -Force
-          New-Item -ItemType Junction -Path "$sdkBase\Lib" -Target "$env:MSVC_ROOT\platform_sdk_lib" -Force
-          New-Item -ItemType Junction -Path "$sdkBase\VC\LIB" -Target "$env:MSVC_ROOT\platform_sdk_lib" -Force
-
-          # Verify
-          if (-not (Test-Path "$sdkBase\Include\windows.h")) {
-            Write-Error "windows.h not found at $sdkBase\Include"
-            exit 1
-          }
-          Write-Host "SDK junctions OK"
-
-          # Cygwin: create dir, get perl + bison from Git for Windows (already on runner)
-          New-Item -ItemType Directory -Force -Path "third_party\cygwin\bin" | Out-Null
-          $gitBin = "C:\Program Files\Git\usr\bin"
-          Copy-Item "$gitBin\perl.exe" "third_party\cygwin\bin\perl.exe"
-          Copy-Item "$gitBin\bison.exe" "third_party\cygwin\bin\bison.exe"
-          Write-Host "perl: $((Get-Item 'third_party\cygwin\bin\perl.exe').Length) bytes"
-          Write-Host "bison: $((Get-Item 'third_party\cygwin\bin\bison.exe').Length) bytes"
           
       # ── 4. DirectX 9.0c SDK headers (Dec 2006) ─────────────────
       - name: Cache DX9 headers
@@ -304,6 +275,35 @@ jobs:
         run: |
           Get-Content "chromium\chrome\VERSION" -ErrorAction SilentlyContinue
           Get-ChildItem "chromium" -Name | Select-Object -First 20
+
+      - name: Setup in-tree SDK and Cygwin paths
+        shell: pwsh
+        run: |
+          Set-Location "chromium"
+
+          # Create the expected SDK layout using junctions to setup-msvc toolchain
+          $sdkBase = "third_party\platformsdk_vista_6_0\files"
+          New-Item -ItemType Directory -Force -Path "$sdkBase\VC" | Out-Null
+
+          New-Item -ItemType Junction -Path "$sdkBase\Include" -Target "$env:MSVC_ROOT\platform_sdk_include" -Force
+          New-Item -ItemType Junction -Path "$sdkBase\VC\INCLUDE" -Target "$env:MSVC_ROOT\platform_sdk_include" -Force
+          New-Item -ItemType Junction -Path "$sdkBase\Lib" -Target "$env:MSVC_ROOT\platform_sdk_lib" -Force
+          New-Item -ItemType Junction -Path "$sdkBase\VC\LIB" -Target "$env:MSVC_ROOT\platform_sdk_lib" -Force
+
+          # Verify
+          if (-not (Test-Path "$sdkBase\Include\windows.h")) {
+            Write-Error "windows.h not found at $sdkBase\Include"
+            exit 1
+          }
+          Write-Host "SDK junctions OK"
+
+          # Cygwin: create dir, get perl + bison from Git for Windows (already on runner)
+          New-Item -ItemType Directory -Force -Path "third_party\cygwin\bin" | Out-Null
+          $gitBin = "C:\Program Files\Git\usr\bin"
+          Copy-Item "$gitBin\perl.exe" "third_party\cygwin\bin\perl.exe"
+          Copy-Item "$gitBin\bison.exe" "third_party\cygwin\bin\bison.exe"
+          Write-Host "perl: $((Get-Item 'third_party\cygwin\bin\perl.exe').Length) bytes"
+          Write-Host "bison: $((Get-Item 'third_party\cygwin\bin\bison.exe').Length) bytes"
 
       # ── 7. Setup build environment ─────────────────────────────
       - name: Setup VS2005 directory structure
