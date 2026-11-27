@@ -344,17 +344,11 @@ jobs:
       - name: Apply source patches
         shell: pwsh
         run: |
-          $patch = "$env:GITHUB_WORKSPACE\patch.patch"
-          Write-Host "Looking for: $patch"
-          Write-Host "Exists: $(Test-Path $patch)"
-          if (-not (Test-Path $patch)) {
-            Write-Host "Repo root contents:"
-            Get-ChildItem $env:GITHUB_WORKSPACE -Name
-            Write-Error "Patch file not found"
-            exit 1
-          }
+          curl.exe -L -o "$env:RUNNER_TEMP\patch.patch" `
+            "https://raw.githubusercontent.com/JJminecraftguy/Build-Chromium/main/patch.patch"
+
           Set-Location "$env:GITHUB_WORKSPACE\chromium"
-          & "C:\Program Files\Git\bin\git.exe" apply --verbose "$patch"
+          & "C:\Program Files\Git\bin\git.exe" apply --verbose "$env:RUNNER_TEMP\patch.patch"
           if ($LASTEXITCODE -ne 0) {
             Write-Error "Patch failed"
             exit $LASTEXITCODE
