@@ -731,28 +731,20 @@ jobs:
           [System.IO.File]::WriteAllLines("$PWD\SConstruct", $lines)
           Get-Content "SConstruct"
           
-      - name: Verify MSVC ATL headers
+      - name: Check MSVC 2005 ATL files
         shell: pwsh
         run: |
-          $atlDir = "$env:MSVC_ROOT\atlmfc\include"
-          $atlHeader = "$atlDir\atlbase.h"
+          $url = "https://raw.githubusercontent.com/widberg/msvc8.0/master/atlmfc/include/atlbase.h"
+          $output = "$env:RUNNER_TEMP\atlbase.h"
 
-          Write-Host "MSVC_ROOT: $env:MSVC_ROOT"
-          Write-Host "ATL directory: $atlDir"
+          curl.exe -fL -o $output $url
 
-          if (-not (Test-Path $atlDir)) {
-              throw "ATL include directory does not exist: $atlDir"
+          if ($LASTEXITCODE -ne 0) {
+              throw "Could not download atlbase.h"
           }
 
-          if (-not (Test-Path $atlHeader)) {
-              Write-Host "Searching for atlbase.h..."
-              Get-ChildItem $env:MSVC_ROOT -Filter atlbase.h -Recurse -ErrorAction SilentlyContinue |
-                  Select-Object -ExpandProperty FullName
-
-              throw "atlbase.h is missing from the MSVC installation"
-          }
-
-          Write-Host "atlbase.h exists."
+          Write-Host "ATL header download successful."
+          Get-Item $output | Format-List FullName, Length
 
       - name: Build Chromium
         shell: pwsh
