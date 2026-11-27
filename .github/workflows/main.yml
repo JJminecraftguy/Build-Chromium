@@ -534,22 +534,12 @@ jobs:
             Write-Host "Chromium ICU include path patch already exists."
           }
 
-          # Add a diagnostic before launching nested V8 SCons.
-          $oldCommand = 'cd ..\\v8 && $PYTHON $SCONS $SCONSFLAGS ${TARGETS[:-1]}'
-          $newCommand = 'cd ..\\v8 && where cl && $PYTHON $SCONS $SCONSFLAGS ${TARGETS[:-1]}'
+          # Inspect the actual nested V8 SCons command.
+          Write-Host "=== V8 SCons command inspection ==="
 
-          if ($content.Contains($oldCommand)) {
-            $content = $content.Replace($oldCommand, $newCommand)
-            Write-Host "Added V8 compiler diagnostic."
-          }
-          elseif ($content.Contains('where cl &&')) {
-            Write-Host "V8 compiler diagnostic already exists."
-          }
-          else {
-            Write-Host "Actual V8 SCons command:"
-            $content -split "`r?`n" | Where-Object { $_ -match 'SCONSFLAGS|TARGETS' }
-            throw "Could not find expected nested V8 SCons command."
-          }
+          $content -split "`r?`n" |
+            Select-String -Pattern 'v8|SCONS|Command\(|TARGETS' |
+            ForEach-Object { Write-Host $_.Line }
 
           [System.IO.File]::WriteAllText(
             $file,
