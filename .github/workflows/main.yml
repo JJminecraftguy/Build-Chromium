@@ -606,25 +606,29 @@ jobs:
             "",
             "env = env.Clone()",
             "",
-            "# Locate the MSVC 2005 compiler.",
-            "_msvc_bin = os.environ.get('MSVC_BIN')",
-            "if not _msvc_bin:",
-            "  _msvc_root = os.environ.get('MSVC_ROOT')",
-            "  if _msvc_root:",
-            "    _msvc_bin = os.path.join(_msvc_root, 'bin')",
+            "# Locate MSVC 2005.",
+            "_msvc_root = os.environ.get('MSVC_ROOT')",
+            "_msvc_bin = os.path.join(_msvc_root, 'bin') if _msvc_root else None",
             "",
-            "if _msvc_bin:",
-            "  # Make cl.exe available to nested SCons processes.",
-            "  os.environ['PATH'] = _msvc_bin + os.pathsep + os.environ.get('PATH', '')",
-            "  _build_env = env['ENV'].copy()",
-            "  _build_env['PATH'] = _msvc_bin + os.pathsep + _build_env.get('PATH', os.environ.get('PATH', ''))",
-            "  env['ENV'] = _build_env",
+            "if not _msvc_bin or not os.path.isfile(os.path.join(_msvc_bin, 'cl.exe')):",
+            "  raise RuntimeError('MSVC cl.exe not found: %s' % _msvc_bin)",
+            "",
+            "# Make MSVC available to this Python process.",
+            "os.environ['PATH'] = _msvc_bin + os.pathsep + os.environ.get('PATH', '')",
+            "",
+            "# Make MSVC available to SCons command actions.",
+            "_build_env = env['ENV'].copy()",
+            "_build_env['PATH'] = _msvc_bin + os.pathsep + os.environ.get('PATH', '')",
+            "env['ENV'] = _build_env",
+            "",
+            "print('V8 MSVC compiler:', os.path.join(_msvc_bin, 'cl.exe'))",
+            "print('V8 PATH:', env['ENV']['PATH'])",
             ""
           )
 
           $v8MsvcPatch = $v8MsvcPatchLines -join "`r`n"
 
-          if (-not $v8Content.Contains("_msvc_bin = os.environ.get('MSVC_BIN')")) {
+          if (-not $v8Content.Contains("_msvc_root = os.environ.get('MSVC_ROOT')")) {
             if (-not $v8Content.Contains($v8Anchor)) {
               throw "Could not find Import('env') in SConscript.v8"
             }
