@@ -362,6 +362,35 @@ jobs:
             "https://raw.githubusercontent.com/JJminecraftguy/Build-Chromium/main/midl.exe"
           Write-Host "midl.exe: $((Get-Item "$env:MSVC_ROOT\bin\midl.exe").Length) bytes"
 
+      - name: Apply source patches
+        shell: pwsh
+        run: |
+          Set-Location "$env:GITHUB_WORKSPACE\chromium"
+          $f = "build\SConscript.main"
+          $content = Get-Content $f -Raw
+
+          # Force MSVC 2005 bin into SCons subprocess PATH (after msvs detection)
+          $anchor = "  # Force scons to handle long include lines correctly."
+          $insert = "  # Force MSVC 2005 bin into subprocess PATH`n  _msvc_bin = r'C:\Program Files\Microsoft Visual Studio 8\VC\bin'`n  env['ENV']['PATH'] = _msvc_bin + ';' + env['ENV']['PATH']`n`n"
+          if ($content.Contains($anchor)) {
+            $content = $content.Replace($anchor, $insert + $anchor)
+          } else {
+            Write-Error "Anchor not found in SConscript.main"
+            exit 1
+          }
+          Set-Content $f $content -NoNewline
+
+          # Generate patch from diff
+          & "C:\Program Files\Git\bin\git.exe" diff > "$env:GITHUB_WORKSPACE\patch.patch"
+          Write-Host "Generated patch:"
+          Get-Content "$env:GITHUB_WORKSPACE\patch.patch"
+
+      - name: Upload patch artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: patch.patch
+          path: patch.patch
+
       - name: Verify Python 2.4
         shell: pwsh
         run: |
