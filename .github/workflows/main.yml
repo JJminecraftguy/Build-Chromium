@@ -493,7 +493,15 @@ jobs:
             } |
             Select-Object -ExpandProperty FullName
 
+          Write-Host "=== V8 sample options ==="
+          Select-String -Path SConstruct -Pattern "sample.*shell|VerifyOptions|SIMPLE_OPTIONS"
 
+          Write-Host "=== V8 sample build definitions ==="
+          Get-Content samples\SConscript
+
+          Write-Host "=== V8 sample source files ==="
+          Get-ChildItem samples -File |
+            Select-Object -ExpandProperty Name
 
       - name: Upload patch artifact
         uses: actions/upload-artifact@v4
