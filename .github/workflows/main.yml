@@ -298,6 +298,16 @@ jobs:
           Get-Content "chromium\chrome\VERSION" -ErrorAction SilentlyContinue
           Get-ChildItem "chromium" -Name | Select-Object -First 20
 
+      - name: Check for e2embed usage
+        shell: pwsh
+        run: |
+          $hits = Select-String -Path "chromium\**\*.cc","chromium\**\*.h","chromium\**\SConscript*" -Pattern "e2embed" -Recurse -ErrorAction SilentlyContinue
+          if ($hits) {
+            $hits | ForEach-Object { Write-Host "$($_.Path):$($_.LineNumber): $($_.Line.Trim())" }
+          } else {
+            Write-Host "e2embed NOT referenced in source — Vista SDK may not be needed"
+          }
+
       # ── 7. Build ───────────────────────────────────────────────
       - name: Build (placeholder)
         shell: pwsh
