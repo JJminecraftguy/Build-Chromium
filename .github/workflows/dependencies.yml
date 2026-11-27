@@ -167,7 +167,7 @@ jobs:
           }
           Write-Host ">>> icudt38l.dat present: $((Get-Item 'src\third_party\icu38\source\data\in\icudt38l.dat').Length) bytes"
 
-          Copy-Item "icu38_main.scons" "src\third_party\icu38\icu38_main.scons"
+          curl.exe -L -o "src\third_party\icu38\icu38_main.scons" "https://raw.githubusercontent.com/JJminecraftguy/Build-Chromium/main/icu38_main.scons"
 
           Remove-Item -Recurse -Force "$env:RUNNER_TEMP\icu"
         shell: powershell
