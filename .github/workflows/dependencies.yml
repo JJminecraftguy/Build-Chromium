@@ -167,7 +167,8 @@ jobs:
       - name: Fetch ICU 3.8.1 (if not cached)
         if: steps.icu-cache.outputs.cache-hit != 'true'
         run: |
-          Invoke-WebRequest -Uri "https://downloads.sourceforge.net/project/icu/ICU4C/3.8.1/icu4c-3_8_1-src.tgz" -OutFile "$env:RUNNER_TEMP\icu4c-3_8_1-src.tgz"
+          Start-Sleep -Seconds 6
+          curl.exe -L -o "$env:RUNNER_TEMP\icu4c-3_8_1-src.tgz" "https://downloads.sourceforge.net/project/icu/ICU4C/3.8.1/icu4c-3_8_1-src.tgz"
           7z x "$env:RUNNER_TEMP\icu4c-3_8_1-src.tgz" -o"$env:RUNNER_TEMP\icu" -y
           New-Item -ItemType Directory -Force -Path src\third_party
           Move-Item -Path "$env:RUNNER_TEMP\icu\icu-3_8_1\source" -Destination src\third_party\icu38
