@@ -358,16 +358,12 @@ jobs:
       - name: Test cl.exe
         shell: pwsh
         run: |
-          $cl = "C:\Program Files\Microsoft Visual Studio 8\VC\bin\cl.exe"
-          Write-Host "Exists: $(Test-Path $cl)"
-          Write-Host "Size: $((Get-Item $cl).Length) bytes"
+          $binDir = "C:\Program Files\Microsoft Visual Studio 8\VC\bin"
+          Write-Host "Contents of $binDir:"
+          Get-ChildItem $binDir | ForEach-Object { Write-Host "  $($_.Name) ($([math]::Round($_.Length/1KB)) KB)" }
           
-          # Check what DLLs it depends on
-          & "C:\Program Files\Git\usr\bin\objdump.exe" -p $cl 2>$null | Select-String "DLL Name"
-          
-          # Try running it
-          $env:PATH = "$((Get-Item $cl).Directory.FullName);$($env:PATH)"
-          & $cl /? 2>&1 | Select-Object -First 5
+          Write-Host "`nRunning cl /?:"
+          & "$binDir\cl.exe" /? 2>&1 | Select-Object -First 5
           Write-Host "Exit: $LASTEXITCODE"
 
       - name: Add midl.exe
