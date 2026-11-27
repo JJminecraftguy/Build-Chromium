@@ -146,7 +146,15 @@ jobs:
         uses: actions/cache/save@v4
         with:
           path: src/googleurl
-          key: googleurl-r921
+          key: googleurl-r92
+
+      # --- ICU 3.8.1 ---
+      - name: Restore ICU cache
+        id: icu-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: src/third_party/icu38
+          key: icu38-3.8.1
 
       - name: Fetch ICU 3.8.1 (if not cached)
         if: steps.icu-cache.outputs.cache-hit != 'true'
