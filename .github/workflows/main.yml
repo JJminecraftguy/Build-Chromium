@@ -348,15 +348,15 @@ jobs:
 
           # Patch 1: build_component fallback
           $f = "build\SConscript.main"
-          $lines = Get-Content $f
-          for ($i = 0; $i -lt $lines.Count; $i++) {
-            if ($lines[$i] -match "^Import\('build_component'\)$") {
-              $lines[$i] = "if 'build_component' not in globals():`n    build_component = 'chrome'`nImport('build_component')"
-              break
-            }
-          }
-          Set-Content $f $lines -NoNewline
+          $content = Get-Content $f -Raw
+          $content = $content -replace "Import\('build_component'\)", "if 'build_component' not in globals():`n    build_component = 'chrome'`nImport('build_component')"
+          Set-Content $f $content -NoNewline
 
+          # Add more patches here...
+
+          & "C:\Program Files\Git\bin\git.exe" diff > "$env:GITHUB_WORKSPACE\patch.patch"
+          Write-Host "Generated patch:"
+          Get-Content "$env:GITHUB_WORKSPACE\patch.patch"
           # Add more patches here as needed...
 
           # Generate the patch from the diff
