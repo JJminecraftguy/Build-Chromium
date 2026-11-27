@@ -1,0 +1,10 @@
+--- a/build/SConscript.main
++++ b/build/SConscript.main
+@@ -505,5 +505,7 @@
+     Help(help_fmt % components)
+ 
+ 
++if 'build_component' not in globals():
++    build_component = 'chrome'
+ Import('build_component')
+ Default(build_component)
