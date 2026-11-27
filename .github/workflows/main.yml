@@ -696,35 +696,21 @@ jobs:
           Get-Content "SConstruct"
           
 
-      - name: Inspect V8 build configuration
+      - name: Diagnose SCons clobber options
         shell: pwsh
         run: |
-          Set-Location "$env:GITHUB_WORKSPACE\chromium\v8"
+          Set-Location "$env:GITHUB_WORKSPACE\chromium"
 
-          Write-Host "=== SConstruct lines 250-290 ==="
-          $s = Get-Content SConstruct
-          $s[249..289]
+          Write-Host "=== Find clobber registrations ==="
 
-          Write-Host "=== SConstruct lines 320-360 ==="
-          $s[319..359]
-
-          Write-Host "=== SConstruct lines 400-490 ==="
-          $s[399..489]
-
-          Write-Host "=== src/SConscript lines 90-145 ==="
-          $s = Get-Content src\SConscript
-          $s[89..144]
-
-          Write-Host "=== Existing V8 build directories ==="
-          Get-ChildItem -Directory |
-            Select-Object -ExpandProperty Name
-
-          Write-Host "=== Existing V8 executables and libraries ==="
-          Get-ChildItem -Recurse -File |
+          Get-ChildItem build,v8 -Recurse -File |
             Where-Object {
-              $_.Name -match '^(mksnapshot|v8|snapshot-empty).*\.(exe|lib|obj)$'
+              $_.Extension -in ".py", ".scons"
             } |
-            Select-Object -ExpandProperty FullName
+            Select-String -Pattern "clobber|AddOption|add_local_option" |
+            ForEach-Object {
+              Write-Host "$($_.Path):$($_.LineNumber): $($_.Line.Trim())"
+            }
 
       - name: Build Chromium
         shell: pwsh
