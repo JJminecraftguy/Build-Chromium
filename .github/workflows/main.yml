@@ -384,54 +384,78 @@ jobs:
         run: |
           Set-Location "$env:GITHUB_WORKSPACE\chromium"
 
-          # Patch Chromium's main SCons environment for MSVC 2005.
-          $f = "build\SConscript.main"
-          $content = Get-Content $f -Raw
+          # ============================================================
+          # 1. Patch Chromium's main SCons environment for MSVC 2005
+          # ============================================================
+
+          $mainFile = "build\SConscript.main"
+
+          if (-not (Test-Path $mainFile)) {
+            throw "SConscript.main not found"
+          }
+
+          $mainContent = [System.IO.File]::ReadAllText(
+            (Resolve-Path $mainFile)
+          )
 
           $msvcRoot = $env:MSVC_ROOT
+
           if (-not $msvcRoot) {
             throw "MSVC_ROOT is not set"
           }
 
-          $insertLines = @(
+          $msvcAnchor = "  # Force scons to handle long include lines correctly."
+
+          $msvcPatchLines = @(
             "  # Force MSVC 2005 paths into SCons subprocess environment",
+            "  import os",
             "  _msvc_bin = r'$msvcRoot\bin'",
             "  _msvc_inc = r'$msvcRoot\include'",
             "  _msvc_lib = r'$msvcRoot\lib'",
             "  _sdk_inc  = r'$msvcRoot\platform_sdk_include'",
             "  _sdk_lib  = r'$msvcRoot\platform_sdk_lib'",
-            "  env['ENV']['PATH'] = _msvc_bin + ';' + env['ENV']['PATH']",
-            "  env['ENV']['INCLUDE'] = _msvc_inc + ';' + _sdk_inc + ';' + env['ENV']['INCLUDE']",
-            "  env['ENV']['LIB'] = _msvc_lib + ';' + _sdk_lib + ';' + env['ENV']['LIB']",
+            "  env['ENV']['PATH'] = _msvc_bin + ';' + env['ENV'].get('PATH', os.environ.get('PATH', ''))",
+            "  env['ENV']['INCLUDE'] = _msvc_inc + ';' + _sdk_inc + ';' + env['ENV'].get('INCLUDE', os.environ.get('INCLUDE', ''))",
+            "  env['ENV']['LIB'] = _msvc_lib + ';' + _sdk_lib + ';' + env['ENV'].get('LIB', os.environ.get('LIB', ''))",
             ""
           )
-          $insert = $insertLines -join "`n"
 
-          $anchor = "  # Force scons to handle long include lines correctly."
-          if (-not $content.Contains($anchor)) {
-            throw "MSVC patch anchor not found in SConscript.main"
-          }
+          $msvcPatch = $msvcPatchLines -join "`r`n"
 
-          if (-not $content.Contains("_msvc_bin")) {
-            $content = $content.Replace($anchor, $insert + $anchor)
-            Set-Content $f $content -NoNewline
+          if (-not $mainContent.Contains("_msvc_bin")) {
+            if (-not $mainContent.Contains($msvcAnchor)) {
+              throw "MSVC patch anchor not found in SConscript.main"
+            }
+
+            $mainContent = $mainContent.Replace(
+              $msvcAnchor,
+              $msvcPatch + $msvcAnchor
+            )
+
             Write-Host "Applied MSVC environment patch."
-          } else {
+          }
+          else {
             Write-Host "MSVC environment patch already exists."
           }
 
-          # Patch Chromium's V8 SCons invocation.
-          $file = Join-Path $env:GITHUB_WORKSPACE "chromium\build\SConscript.v8"
+          # ============================================================
+          # 2. Patch Chromium's V8 SCons wrapper
+          # ============================================================
 
-          if (-not (Test-Path $file)) {
-            throw "SConscript.v8 was not found at $file"
+          $v8File = "build\SConscript.v8"
+
+          if (-not (Test-Path $v8File)) {
+            throw "SConscript.v8 not found"
           }
 
-          $content = [System.IO.File]::ReadAllText($file)
+          $v8Content = [System.IO.File]::ReadAllText(
+            (Resolve-Path $v8File)
+          )
 
-          # Add MSVC compiler path to V8's SCons environment.
-          $anchor = "Import('env')"
-          $msvcPatch = @(
+          # Add MSVC compiler path to the nested V8 SCons environment.
+          $v8Anchor = "Import('env')"
+
+          $v8MsvcPatchLines = @(
             "Import('env')",
             "",
             "import os",
@@ -445,64 +469,101 @@ jobs:
             "    _msvc_bin = os.path.join(_msvc_root, 'bin')",
             "",
             "if _msvc_bin:",
-            "  env['ENV']['PATH'] = _msvc_bin + os.pathsep + os.environ.get('PATH', '')"
-          ) -join "`r`n"
+            "  env['ENV']['PATH'] = _msvc_bin + os.pathsep + os.environ.get('PATH', '')",
+            ""
+          )
 
-          if (-not $content.Contains("_msvc_bin = os.environ.get('MSVC_BIN')")) {
-            if (-not $content.Contains($anchor)) {
+          $v8MsvcPatch = $v8MsvcPatchLines -join "`r`n"
+
+          if (-not $v8Content.Contains("_msvc_bin = os.environ.get('MSVC_BIN')")) {
+            if (-not $v8Content.Contains($v8Anchor)) {
               throw "Could not find Import('env') in SConscript.v8"
             }
 
-            $content = $content.Replace($anchor, $msvcPatch)
+            $v8Content = $v8Content.Replace(
+              $v8Anchor,
+              $v8MsvcPatch
+            )
+
             Write-Host "Applied V8 MSVC PATH patch."
-          } else {
+          }
+          else {
             Write-Host "V8 MSVC PATH patch already exists."
           }
 
-          # Correct V8 output paths.
-          $content = $content.Replace(
+          # ============================================================
+          # 3. Correct V8 output paths
+          # ============================================================
+
+          $v8Content = $v8Content.Replace(
             "File('#/../v8/bin/debug/mksnapshot.exe')",
             "File('#/../v8/obj/debug/mksnapshot.exe')"
           )
 
-          $content = $content.Replace(
+          $v8Content = $v8Content.Replace(
             "File('#/../v8/bin/release/v8.exe')",
             "File('#/../v8/obj/release/shell.exe')"
           )
 
-          $content = $content.Replace(
+          $v8Content = $v8Content.Replace(
             "File('#/../v8/bin/debug/v8.lib'),",
-            "File('#/../v8/v8.lib')"
+            "File('#/../v8/v8.lib'),"
           )
 
-          $content = $content.Replace(
+          $v8Content = $v8Content.Replace(
             "File('#/../v8/bin/debug/snapshot-empty.obj')",
             "File('#/../v8/obj/debug/snapshot-empty.obj')"
           )
 
-          # Request the shell sample and both debug/release outputs.
+          # ============================================================
+          # 4. Configure nested V8 SCons flags
+          # ============================================================
+
           $oldFlags = "SCONSFLAGS='-Q --warn=no-deprecated')"
+
           $debugFlags = "SCONSFLAGS='-Q --warn=no-deprecated os=win32 mode=debug snapshot=on sample=shell')"
+
           $oldPatchedFlags = "SCONSFLAGS='-Q --warn=no-deprecated os=win32 mode=debug snapshot=on')"
 
-          if ($content.Contains($oldFlags)) {
-            $content = $content.Replace($oldFlags, $debugFlags)
+          $releaseDebugFlags = "SCONSFLAGS='-Q --warn=no-deprecated os=win32 mode=debug,release snapshot=on sample=shell')"
+
+          if ($v8Content.Contains($oldFlags)) {
+            $v8Content = $v8Content.Replace(
+              $oldFlags,
+              $debugFlags
+            )
           }
-          elseif ($content.Contains($oldPatchedFlags)) {
-            $content = $content.Replace($oldPatchedFlags, $debugFlags)
+          elseif ($v8Content.Contains($oldPatchedFlags)) {
+            $v8Content = $v8Content.Replace(
+              $oldPatchedFlags,
+              $debugFlags
+            )
           }
-          elseif (-not $content.Contains($debugFlags)) {
-            throw "Could not find expected SCONSFLAGS in SConscript.v8"
+          elseif (-not $v8Content.Contains($debugFlags) -and
+                  -not $v8Content.Contains($releaseDebugFlags)) {
+            throw "Could not find expected V8 SCONSFLAGS"
           }
 
-          $content = $content.Replace(
-            "SCONSFLAGS='-Q --warn=no-deprecated os=win32 mode=debug snapshot=on sample=shell'",
-            "SCONSFLAGS='-Q --warn=no-deprecated os=win32 mode=debug,release snapshot=on sample=shell'"
+          $v8Content = $v8Content.Replace(
+            $debugFlags,
+            $releaseDebugFlags
           )
 
-          # Patch Chromium's main SCons environment to include ICU 3.8.1 headers.
-          $f = "build\SConscript.main"
-          $content = Get-Content $f -Raw
+          # ============================================================
+          # 5. Save V8 configuration BEFORE touching SConscript.main
+          # ============================================================
+
+          [System.IO.File]::WriteAllText(
+            (Join-Path $PWD $v8File),
+            $v8Content,
+            [System.Text.UTF8Encoding]::new($false)
+          )
+
+          Write-Host "Saved SConscript.v8 successfully."
+
+          # ============================================================
+          # 6. Add ICU 3.8.1 include paths to Chromium
+          # ============================================================
 
           $icuAnchor = "  # Force scons to handle long include lines correctly."
 
@@ -521,40 +582,67 @@ jobs:
 
           $icuPatch = $icuPatchLines -join "`r`n"
 
-          if (-not $content.Contains("Add ICU 3.8.1 public headers")) {
-            if (-not $content.Contains($icuAnchor)) {
-              throw "Could not find ICU patch anchor in SConscript.main"
+          if (-not $mainContent.Contains("Add ICU 3.8.1 public headers")) {
+            if (-not $mainContent.Contains($icuAnchor)) {
+              throw "ICU patch anchor not found in SConscript.main"
             }
 
-            $content = $content.Replace($icuAnchor, $icuPatch + $icuAnchor)
-            Set-Content $f $content -NoNewline
+            $mainContent = $mainContent.Replace(
+              $icuAnchor,
+              $icuPatch + $icuAnchor
+            )
 
-            Write-Host "Applied Chromium ICU include path patch."
-          } else {
-            Write-Host "Chromium ICU include path patch already exists."
+            Write-Host "Applied ICU include path patch."
+          }
+          else {
+            Write-Host "ICU include path patch already exists."
           }
 
-          # Inspect the actual nested V8 SCons command.
-          Write-Host "=== V8 SCons command inspection ==="
-
-          $content -split "`r?`n" |
-            Select-String -Pattern 'v8|SCONS|Command\(|TARGETS' |
-            ForEach-Object { Write-Host $_.Line }
+          # ============================================================
+          # 7. Save Chromium main configuration
+          # ============================================================
 
           [System.IO.File]::WriteAllText(
-            $file,
-            $content,
+            (Join-Path $PWD $mainFile),
+            $mainContent,
             [System.Text.UTF8Encoding]::new($false)
           )
 
-          Write-Host "=== Patched V8 configuration ==="
-          Get-Content $file
+          Write-Host "Saved SConscript.main successfully."
 
-          # Save the resulting source diff.
-          & "C:\Program Files\Git\bin\git.exe" diff > "$env:GITHUB_WORKSPACE\patch.patch"
+          # ============================================================
+          # 8. Verify both patched files
+          # ============================================================
 
-          Write-Host "=== Generated patch ==="
+          Write-Host ""
+          Write-Host "========== SConscript.v8 =========="
+          Get-Content $v8File
+
+          Write-Host ""
+          Write-Host "========== SConscript.main =========="
+          Select-String -Path $mainFile -Pattern "MSVC|_msvc_|ICU 3.8.1|ICU38_DIR"
+
+          if (-not (Select-String -Path $v8File -Pattern "mksnapshot_exe = File")) {
+            throw "SConscript.v8 appears corrupted"
+          }
+
+          if (-not (Select-String -Path $v8File -Pattern "SCONSFLAGS")) {
+            throw "V8 SCONSFLAGS missing"
+          }
+
+          # ============================================================
+          # 9. Generate source patch artifact
+          # ============================================================
+
+          & "C:\Program Files\Git\bin\git.exe" diff -- build\SConscript.main build\SConscript.v8 |
+            Out-File -FilePath "$env:GITHUB_WORKSPACE\patch.patch" -Encoding utf8
+
+          Write-Host ""
+          Write-Host "========== Generated patch =========="
           Get-Content "$env:GITHUB_WORKSPACE\patch.patch"
+
+          Write-Host ""
+          Write-Host "Source patching completed successfully."
 
 
       - name: Upload patch artifact
