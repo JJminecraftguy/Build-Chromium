@@ -496,22 +496,29 @@ jobs:
           [System.IO.File]::WriteAllLines("$PWD\SConstruct", $lines)
           Get-Content "SConstruct"
           
-      - name: Test V8 mksnapshot target
+      - name: Diagnose V8 snapshot configuration
         shell: pwsh
         run: |
-          Set-Location "$env:GITHUB_WORKSPACE\chromium\v8"
+          $v8 = "$env:GITHUB_WORKSPACE\chromium\v8"
+          $chrome = "$env:GITHUB_WORKSPACE\chromium"
 
-          Write-Host "Building V8 mksnapshot alias..."
+          Write-Host "=== V8 SConstruct ==="
+          Select-String "$v8\SConstruct" `
+            -Pattern "mksnapshot|snapshot_targets|Alias|snapshot"
 
-          & $env:PYTHON ..\third_party\scons\scons.py `
-            -Q os=win32 mksnapshot
+          Write-Host "=== V8 src/SConscript ==="
+          Select-String "$v8\src\SConscript" `
+            -Pattern "mksnapshot|snapshot|Program"
 
-          if ($LASTEXITCODE -ne 0) {
-            throw "V8 mksnapshot target failed"
-          }
+          Write-Host "=== Chromium SConscript.v8 ==="
+          Select-String "$chrome\build\SConscript.v8" `
+            -Pattern "mksnapshot|snapshot|SCONSFLAGS|TARGETS"
 
-          Write-Host "Checking generated executable:"
-          Get-ChildItem -Path . -Filter "mksnapshot.exe" -Recurse |
+          Write-Host "=== V8 snapshot-related files ==="
+          Get-ChildItem "$v8\src" -Recurse -File |
+            Where-Object {
+              $_.Name -match "snapshot|mksnapshot"
+            } |
             Select-Object -ExpandProperty FullName
 
       - name: Build Chromium
