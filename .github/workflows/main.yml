@@ -21,6 +21,24 @@ jobs:
         with:
           version: '14.00.50727.762'
 
+      - name: Configure MSVC environment
+        shell: pwsh
+        run: |
+          $msvcBin = "$env:MSVC_ROOT\bin"
+
+          if (-not (Test-Path "$msvcBin\cl.exe")) {
+            throw "MSVC compiler not found: $msvcBin\cl.exe"
+          }
+
+          $env:MSVC_BIN = $msvcBin
+          $env:PATH = "$msvcBin;$env:PATH"
+
+          "MSVC_BIN=$msvcBin" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+          "PATH=$env:PATH" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+
+          Write-Host "MSVC_BIN=$msvcBin"
+          where.exe cl.exe
+
       - name: Verify compiler
         shell: pwsh
         run: cl.exe /?
@@ -336,9 +354,17 @@ jobs:
           New-Item -ItemType Junction -Path "$vcDir\lib"     -Target "$env:MSVC_ROOT\lib"     -Force
 
           # Also need atlmfc (referenced in CPPPATH/LIBPATH)
-          $atlmfc = "$vsRoot\VC\atlmfc"
-          New-Item -ItemType Directory -Force -Path "$atlmfc\include" | Out-Null
-          New-Item -ItemType Directory -Force -Path "$atlmfc\lib" | Out-Null
+          $atlmfcSource = "$env:GITHUB_WORKSPACE\msvc8-atlmfc\atlmfc"
+          $atlmfcTarget = "$vsRoot\VC\atlmfc"
+
+          if (Test-Path $atlmfcTarget) {
+            Remove-Item $atlmfcTarget -Recurse -Force
+          }
+
+          New-Item -ItemType Junction `
+            -Path $atlmfcTarget `
+            -Target $atlmfcSource `
+            -Force | Out-Null
 
           # Verify
           if (-not (Test-Path "$vcDir\bin\cl.exe")) {
