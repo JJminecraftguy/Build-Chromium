@@ -333,6 +333,22 @@ jobs:
             "https://raw.githubusercontent.com/JJminecraftguy/Build-Chromium/main/midl.exe"
           Write-Host "midl.exe: $((Get-Item "$env:MSVC_ROOT\bin\midl.exe").Length) bytes"
 
+      - name: Apply source patches
+        shell: pwsh
+        run: |
+          Set-Location "chromium"
+          $patch = "..\patch.patch"
+          if (-not (Test-Path $patch)) {
+            Write-Host "No patch file found"
+            return
+          }
+          & "C:\Program Files\Git\bin\git.exe" apply --verbose $patch
+          if ($LASTEXITCODE -ne 0) {
+            Write-Error "Patch failed"
+            exit $LASTEXITCODE
+          }
+          Write-Host "Patch applied"
+
       - name: Verify Python 2.4
         shell: pwsh
         run: |
