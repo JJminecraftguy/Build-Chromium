@@ -5,14 +5,6 @@ jobs:
   fetch:
     runs-on: windows-latest
     steps:
-      - name: Install Python 2.5.4
-        run: |
-          Start-BitsTransfer -Source "https://www.python.org/ftp/python/2.5.4/python-2.5.4.msi" -Destination "$env:RUNNER_TEMP\py254.msi"
-          msiexec /i "$env:RUNNER_TEMP\py254.msi" /qn TARGETDIR="C:\Python25"
-          echo "C:\Python25" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
-          echo "C:\Python25\Scripts" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
-        shell: powershell
-
       # --- Breakpad ---
       - name: Restore Breakpad cache
         id: breakpad-cache
