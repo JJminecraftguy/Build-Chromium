@@ -83,6 +83,54 @@ jobs:
 
       # ── 5. Fetch Chromium dependencies ─────────────────────────
 
+      - name: Restore MSVC 2005 ATL/MFC cache
+        id: atl-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: msvc8-atlmfc/atlmfc
+          key: msvc8-atlmfc-vc80-x86-v1
+
+      - name: Download MSVC 2005 ATL/MFC
+        if: steps.atl-cache.outputs.cache-hit != 'true'
+        shell: pwsh
+        run: |
+          $source = "$env:RUNNER_TEMP\msvc8-source"
+          $destination = "$env:GITHUB_WORKSPACE\msvc8-atlmfc"
+
+          git clone --depth 1 --filter=blob:none --sparse `
+            https://github.com/widberg/msvc8.0.git $source
+
+          if ($LASTEXITCODE -ne 0) {
+              throw "Failed to clone MSVC 2005 toolchain repository"
+          }
+
+          git -C $source sparse-checkout set atlmfc
+
+          if ($LASTEXITCODE -ne 0) {
+              throw "Failed to retrieve ATL/MFC directory"
+          }
+
+          New-Item -ItemType Directory -Force -Path $destination | Out-Null
+
+          Copy-Item "$source\atlmfc" "$destination\atlmfc" -Recurse -Force
+
+          if (-not (Test-Path "$destination\atlmfc\include\atlbase.h")) {
+              throw "atlbase.h was not found in downloaded ATL/MFC files"
+          }
+
+          if (-not (Test-Path "$destination\atlmfc\lib")) {
+              throw "ATL/MFC library directory is missing"
+          }
+
+          Write-Host "ATL/MFC downloaded successfully."
+
+      - name: Save MSVC 2005 ATL/MFC cache
+        if: steps.atl-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: msvc8-atlmfc/atlmfc
+          key: msvc8-atlmfc-vc80-x86-v1
+
       # --- Breakpad ---
       - name: Restore Breakpad cache
         id: breakpad-cache
@@ -348,6 +396,49 @@ jobs:
           path: chromium/third_party/cygwin/bin/bison.exe
           key: winflexbison-2.5.24
 
+      - name: Configure MSVC 2005 ATL/MFC
+        shell: pwsh
+        run: |
+          $atlRoot = "$env:GITHUB_WORKSPACE\msvc8-atlmfc\atlmfc"
+          $includeDir = "$atlRoot\include"
+          $libDir = "$atlRoot\lib"
+
+          if (-not (Test-Path "$includeDir\atlbase.h")) {
+              throw "Missing ATL header: $includeDir\atlbase.h"
+          }
+
+          if (-not (Test-Path $libDir)) {
+              throw "Missing ATL/MFC libraries: $libDir"
+          }
+
+          # Configure compiler include directories.
+          $includePaths = @($includeDir)
+
+          if ($env:INCLUDE) {
+              $includePaths += $env:INCLUDE
+          }
+
+          $env:INCLUDE = $includePaths -join ';'
+
+          # Configure linker library directories.
+          $libPaths = @($libDir)
+
+          if ($env:LIB) {
+              $libPaths += $env:LIB
+          }
+
+          $env:LIB = $libPaths -join ';'
+
+          # Persist for subsequent GitHub Actions steps.
+          "INCLUDE=$env:INCLUDE" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+          "LIB=$env:LIB" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+          "MSVC_ATLMFC_ROOT=$atlRoot" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+
+          Write-Host "ATL/MFC configured."
+          Write-Host "Include: $includeDir"
+          Write-Host "Libraries: $libDir"
+          Write-Host "atlbase.h exists: $(Test-Path "$includeDir\atlbase.h")"
+
       - name: Install ICU Unicode headers
         shell: pwsh
         run: |
@@ -405,9 +496,6 @@ jobs:
           curl.exe -L -o "$env:MSVC_ROOT\bin\midl.exe" `
             "https://raw.githubusercontent.com/JJminecraftguy/Build-Chromium/main/midl.exe"
           Write-Host "midl.exe: $((Get-Item "$env:MSVC_ROOT\bin\midl.exe").Length) bytes"
-
-
-
 
       - name: Apply source patches
         shell: pwsh
