@@ -156,34 +156,27 @@ jobs:
           path: src/googleurl
           key: googleurl-r92
 
-      # --- Chromium icu38 ---
-      - name: Restore Chromium icu38 cache
+      # --- ICU 3.8.1 ---
+      - name: Restore ICU cache
         id: icu-cache
         uses: actions/cache/restore@v4
         with:
           path: src/third_party/icu38
-          key: chromium-icu38-r1227
+          key: icu38-3.8.1
 
-      - name: Fetch Chromium icu38 (if not cached)
+      - name: Fetch ICU 3.8.1 (if not cached)
         if: steps.icu-cache.outputs.cache-hit != 'true'
         run: |
-          git clone --filter=blob:none --no-tags --no-checkout https://chromium.googlesource.com/chromium/src.git chromium-src
-          cd chromium-src
-          $found = @(git log --all --grep="git-svn-id.*@1227 " --format="%H %ad" --date=short)
-          Write-Host ">>> Chromium trunk r1227: $($found.Count) match(es)"
-          foreach ($m in $found) { Write-Host "    $m" }
-          $commit = ($found[0] -split ' ')[0]
-          Write-Host ">>> Checking out deps/third_party/icu38 at: $commit"
-          git checkout $commit -- deps/third_party/icu38
-          cd ..
+          Invoke-WebRequest -Uri "https://sourceforge.net/projects/icu/files/ICU4C/3.8/icu4c-3_8_1-src.tgz/download" -OutFile "$env:RUNNER_TEMP\icu4c-3_8_1-src.tgz"
+          7z x "$env:RUNNER_TEMP\icu4c-3_8_1-src.tgz" -o"$env:RUNNER_TEMP\icu" -y
           New-Item -ItemType Directory -Force -Path src\third_party
-          Move-Item -Path chromium-src\deps\third_party\icu38 -Destination src\third_party\icu38
-          Remove-Item -Recurse -Force chromium-src
+          Move-Item -Path "$env:RUNNER_TEMP\icu\icu-3_8_1\source" -Destination src\third_party\icu38
+          Remove-Item -Recurse -Force "$env:RUNNER_TEMP\icu"
         shell: powershell
 
-      - name: Save Chromium icu38 cache
+      - name: Save ICU cache
         if: steps.icu-cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@v4
         with:
           path: src/third_party/icu38
-          key: chromium-icu38-r1227
+          key: icu38-3.8.1
