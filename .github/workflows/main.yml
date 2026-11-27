@@ -304,8 +304,10 @@ jobs:
 
           # perl from Git for Windows
           Copy-Item "C:\Program Files\Git\usr\bin\perl.exe" "third_party\cygwin\bin\perl.exe"
-
+          Set-Location "$env:GITHUB_WORKSPACE\chromium"
           Write-Host "perl: $((Get-Item 'third_party\cygwin\bin\perl.exe').Length) bytes"
+          New-Item -ItemType Junction -Path "testing\gtest" -Target "$env:GITHUB_WORKSPACE\src\testing\gtest" -Force
+          Write-Host "gtest junction: testing\gtest -> ${env:GITHUB_WORKSPACE}\src\testing\gtest"
 
       - name: Cache bison
         id: bison-cache
