@@ -28,9 +28,10 @@ jobs:
           cd breakpad
           git checkout 2d7664e8d477816e0641e822752f63982c1be74f
           git gc --aggressive --prune=now
-          Remove-Item -Recurse -Force .git
-          New-Item -ItemType Directory -Force -Path ..\src\breakpad
-          Move-Item -Path . -Destination ..\src\breakpad\src
+          cd ..
+          Remove-Item -Recurse -Force breakpad\.git
+          New-Item -ItemType Directory -Force -Path src\breakpad
+          Move-Item -Path breakpad -Destination src\breakpad\src
         shell: powershell
 
       - name: Save Breakpad cache
@@ -55,9 +56,10 @@ jobs:
           cd googletest
           git checkout 26ddf828fa2870982315f4dc8dd4f6e4777f4d29
           git gc --aggressive --prune=now
-          Remove-Item -Recurse -Force .git
-          New-Item -ItemType Directory -Force -Path ..\src\testing
-          Move-Item -Path . -Destination ..\src\testing\gtest
+          cd ..
+          Remove-Item -Recurse -Force googletest\.git
+          New-Item -ItemType Directory -Force -Path src\testing
+          Move-Item -Path googletest -Destination src\testing\gtest
         shell: powershell
 
       - name: Save Googletest cache
@@ -82,9 +84,10 @@ jobs:
           cd v8
           git checkout 4de96712f4295f4e5deaadc5d8a7429889eee00b
           git gc --aggressive --prune=now
-          Remove-Item -Recurse -Force .git
-          New-Item -ItemType Directory -Force -Path ..\src
-          Move-Item -Path . -Destination ..\src\v8
+          cd ..
+          Remove-Item -Recurse -Force v8\.git
+          New-Item -ItemType Directory -Force -Path src
+          Move-Item -Path v8 -Destination src\v8
         shell: powershell
 
       - name: Save V8 cache
@@ -114,9 +117,11 @@ jobs:
           Write-Host ">>> Checking out: $commit"
           git checkout $commit
           git gc --aggressive --prune=now
-          Remove-Item -Recurse -Force .git
-          New-Item -ItemType Directory -Force -Path ..\src\webkit\data
-          Move-Item -Path .\LayoutTests -Destination ..\src\webkit\data\layout_tests
+          cd ..
+          Remove-Item -Recurse -Force WebKit\.git
+          New-Item -ItemType Directory -Force -Path src\webkit\data
+          Move-Item -Path WebKit\LayoutTests -Destination src\webkit\data\layout_tests
+          Remove-Item -Recurse -Force WebKit
         shell: powershell
 
       - name: Save WebKit cache
@@ -175,8 +180,10 @@ jobs:
           $commit = ($found[0] -split ' ')[0]
           Write-Host ">>> Checking out: $commit"
           git checkout $commit -- third_party/icu38
-          New-Item -ItemType Directory -Force -Path ..\src\third_party
-          Move-Item -Path .\third_party\icu38 -Destination ..\src\third_party\icu38
+          cd ..
+          New-Item -ItemType Directory -Force -Path src\third_party
+          Move-Item -Path chromium-src\third_party\icu38 -Destination src\third_party\icu38
+          Remove-Item -Recurse -Force chromium-src
         shell: powershell
 
       - name: Save Chromium icu38 cache
