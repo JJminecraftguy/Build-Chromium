@@ -340,8 +340,6 @@ jobs:
           # setup-msvc put them at: $MSVC_ROOT\{bin,include,lib}
           $vsRoot = "C:\Program Files (x86)\Microsoft Visual Studio 8"
           $vcDir  = "$vsRoot\VC"
-          echo "PATH=$env:MSVC_BIN;$($env:PATH)" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-          Write-Host "cl.exe: $(Test-Path "$env:MSVC_BIN\cl.exe")"
 
           New-Item -ItemType Directory -Force -Path $vcDir | Out-Null
           New-Item -ItemType Junction -Path "$vcDir\bin"     -Target "$env:MSVC_ROOT\bin"     -Force
