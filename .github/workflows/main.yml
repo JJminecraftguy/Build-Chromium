@@ -276,26 +276,28 @@ jobs:
           Get-Content "chromium\chrome\VERSION" -ErrorAction SilentlyContinue
           Get-ChildItem "chromium" -Name | Select-Object -First 20
 
-      - name: Setup in-tree SDK and Cygwin paths
+      - name: Setup VS2005 directory structure
         shell: pwsh
         run: |
-          Set-Location "chromium"
+          $vsRoot = "C:\Program Files\Microsoft Visual Studio 8"
+          $vcDir  = "$vsRoot\VC"
 
-          # Create the expected SDK layout using junctions to setup-msvc toolchain
-          $sdkBase = "third_party\platformsdk_vista_6_0\files"
-          New-Item -ItemType Directory -Force -Path "$sdkBase\VC" | Out-Null
+          New-Item -ItemType Directory -Force -Path $vcDir | Out-Null
+          New-Item -ItemType Junction -Path "$vcDir\bin"     -Target "$env:MSVC_ROOT\bin"     -Force
+          New-Item -ItemType Junction -Path "$vcDir\include" -Target "$env:MSVC_ROOT\include" -Force
+          New-Item -ItemType Junction -Path "$vcDir\lib"     -Target "$env:MSVC_ROOT\lib"     -Force
 
-          New-Item -ItemType Junction -Path "$sdkBase\Include" -Target "$env:MSVC_ROOT\platform_sdk_include" -Force
-          New-Item -ItemType Junction -Path "$sdkBase\VC\INCLUDE" -Target "$env:MSVC_ROOT\platform_sdk_include" -Force
-          New-Item -ItemType Junction -Path "$sdkBase\Lib" -Target "$env:MSVC_ROOT\platform_sdk_lib" -Force
-          New-Item -ItemType Junction -Path "$sdkBase\VC\LIB" -Target "$env:MSVC_ROOT\platform_sdk_lib" -Force
+          # Also need atlmfc (referenced in CPPPATH/LIBPATH)
+          $atlmfc = "$vsRoot\VC\atlmfc"
+          New-Item -ItemType Directory -Force -Path "$atlmfc\include" | Out-Null
+          New-Item -ItemType Directory -Force -Path "$atlmfc\lib" | Out-Null
 
           # Verify
-          if (-not (Test-Path "$sdkBase\Include\windows.h")) {
-            Write-Error "windows.h not found at $sdkBase\Include"
+          if (-not (Test-Path "$vcDir\bin\cl.exe")) {
+            Write-Error "cl.exe not found at $vcDir\bin\cl.exe"
             exit 1
           }
-          Write-Host "SDK junctions OK"
+          Write-Host "VS2005 structure ready at $vsRoot"
 
           # Cygwin: create dir, get perl + bison from Git for Windows (already on runner)
           New-Item -ItemType Directory -Force -Path "third_party\cygwin\bin" | Out-Null
