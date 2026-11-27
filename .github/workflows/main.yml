@@ -495,20 +495,23 @@ jobs:
           )
           [System.IO.File]::WriteAllLines("$PWD\SConstruct", $lines)
           Get-Content "SConstruct"
-
-      - name: Diagnose V8 SCons targets
+          
+      - name: Test V8 mksnapshot target
         shell: pwsh
         run: |
           Set-Location "$env:GITHUB_WORKSPACE\chromium\v8"
 
-          Write-Host "V8 revision:"
-          git log -1 --format="%H %s"
+          Write-Host "Building V8 mksnapshot alias..."
 
-          Write-Host "Checking SCons targets:"
-          & $env:PYTHON ..\third_party\scons\scons.py -Q os=win32 -h
+          & $env:PYTHON ..\third_party\scons\scons.py `
+            -Q os=win32 mksnapshot
 
-          Write-Host "Checking V8 build files:"
-          Get-ChildItem -Recurse -Include SConstruct,SConscript |
+          if ($LASTEXITCODE -ne 0) {
+            throw "V8 mksnapshot target failed"
+          }
+
+          Write-Host "Checking generated executable:"
+          Get-ChildItem -Path . -Filter "mksnapshot.exe" -Recurse |
             Select-Object -ExpandProperty FullName
 
       - name: Build Chromium
