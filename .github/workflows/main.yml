@@ -53,8 +53,6 @@ jobs:
           Copy-Item "$gitBin\bison.exe" "third_party\cygwin\bin\bison.exe"
           Write-Host "perl: $((Get-Item 'third_party\cygwin\bin\perl.exe').Length) bytes"
           Write-Host "bison: $((Get-Item 'third_party\cygwin\bin\bison.exe').Length) bytes"
-          if (Test-Path $gitPerl) {
-            Copy-Item $gitPerl "third_party\cygwin\bin\p
           
       # ── 4. DirectX 9.0c SDK headers (Dec 2006) ─────────────────
       - name: Cache DX9 headers
