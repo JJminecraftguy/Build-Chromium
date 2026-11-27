@@ -486,7 +486,7 @@ jobs:
           $py = Resolve-Path "$env:PYTHON"
           $scons = Resolve-Path "$env:SCONS_PY"
           Set-Location "chromium\build"
-          & $py $scons -j4 build_component=chrome
+          & $py $scons -j4 build_component=chrome os=win32
           if ($LASTEXITCODE -ne 0) {
             exit $LASTEXITCODE
           }
