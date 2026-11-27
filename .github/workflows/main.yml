@@ -903,6 +903,32 @@ jobs:
             -Pattern "ARGUMENTS|Environment\(|ENV|env" `
             -Context 3,5
 
+          Write-Host "=== MSVC Platform SDK ==="
+          Write-Host "MSVC_ROOT: $env:MSVC_ROOT"
+          Write-Host "MSVC_BIN: $env:MSVC_BIN"
+
+          Write-Host "`n=== Relevant Windows headers ==="
+
+          $paths = @(
+              "$env:MSVC_ROOT\platform_sdk_include",
+              "$env:MSVC_ROOT\include",
+              "$env:MSVC_ATLMFC_ROOT\include"
+          )
+
+          foreach ($path in $paths) {
+              Write-Host "`nDirectory: $path"
+              Write-Host "Exists: $(Test-Path $path)"
+
+              if (Test-Path $path) {
+                  Get-ChildItem $path -Filter "winuser.h" -Recurse -File |
+                      ForEach-Object {
+                          Write-Host "Found: $($_.FullName)"
+                          Select-String -Path $_.FullName `
+                              -Pattern "PICONINFOEX|IDI_SHIELD"
+                       }
+              }
+          }
+
       - name: Build Chromium
         shell: pwsh
         run: |
