@@ -149,7 +149,7 @@ jobs:
           Invoke-WebRequest -Uri "https://storage.googleapis.com/google-code-archive-source/v2/code.google.com/google-url/repo.svndump.gz" -OutFile "$env:RUNNER_TEMP\google-url.svndump.gz"
           7z x "$env:RUNNER_TEMP\google-url.svndump.gz" -o"$env:RUNNER_TEMP" -y
           svnadmin create "$env:RUNNER_TEMP\google-url-svn"
-          cmd /c "svnadmin load ""$env:RUNNER_TEMP\google-url-svn"" < ""$env:RUNNER_TEMP\google-url.svndump""
+          cmd /c "svnadmin load ""$env:RUNNER_TEMP\google-url-svn"" < ""$env:RUNNER_TEMP\google-url.svndump"""
           New-Item -ItemType Directory -Force -Path src
           svn checkout "file:///$($env:RUNNER_TEMP.Replace('\','/'))/google-url-svn/trunk@92" src\googleurl
         shell: powershell
