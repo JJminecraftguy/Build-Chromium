@@ -301,7 +301,8 @@ jobs:
       - name: Check for e2embed usage
         shell: pwsh
         run: |
-          $hits = Select-String -Path "chromium\**\*.cc","chromium\**\*.h","chromium\**\SConscript*" -Pattern "e2embed" -Recurse -ErrorAction SilentlyContinue
+          $hits = Get-ChildItem "chromium" -Recurse -Include "*.cc","*.h","SConscript*" -ErrorAction SilentlyContinue |
+            Select-String -Pattern "e2embed" -SimpleMatch
           if ($hits) {
             $hits | ForEach-Object { Write-Host "$($_.Path):$($_.LineNumber): $($_.Line.Trim())" }
           } else {
