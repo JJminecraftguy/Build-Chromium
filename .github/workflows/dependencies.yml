@@ -179,11 +179,29 @@ jobs:
           foreach ($m in $found) { Write-Host "    $m" }
           $commit = ($found[0] -split ' ')[0]
           Write-Host ">>> Checking out: $commit"
-          git checkout $commit -- third_party/icu38
-          cd ..
-          New-Item -ItemType Directory -Force -Path src\third_party
-          Move-Item -Path chromium-src\third_party\icu38 -Destination src\third_party\icu38
-          Remove-Item -Recurse -Force chromium-src
+        shell: powershell
+
+      - name: Diagnose Chromium commit format
+        if: steps.icu-cache.outputs.cache-hit != 'true'
+        run: |
+          cd chromium-src
+          Write-Host "=== Sample commit messages ==="
+          git log --format="%H %ad %s" --date=short -5
+          Write-Host ""
+          Write-Host "=== Does third_party/icu38 exist in history? ==="
+          $pathCommits = @(git log --oneline -- third_party/icu38)
+          Write-Host "Commits touching third_party/icu38: $($pathCommits.Count)"
+          if ($pathCommits.Count -gt 0) {
+            Write-Host "First 5 (newest first):"
+            $pathCommits | Select-Object -First 5 | ForEach-Object { Write-Host "  $_" }
+            Write-Host "Last 5 (oldest first):"
+            $pathCommits | Select-Object -Last 5 | ForEach-Object { Write-Host "  $_" }
+          }
+          Write-Host ""
+          Write-Host "=== Commits around May 2008 (r1227 era) ==="
+          $mayCommits = @(git log --format="%H %ad %s" --date=short --after="2008-05-10" --before="2008-05-25" -- third_party/icu38)
+          Write-Host "Found $($mayCommits.Count) commits in date range:"
+          foreach ($c in $mayCommits) { Write-Host "  $c" }
         shell: powershell
 
       - name: Save Chromium icu38 cache
