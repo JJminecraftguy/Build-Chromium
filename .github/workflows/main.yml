@@ -46,48 +46,29 @@ jobs:
             exit 1
           }
 
-          # Mount the ISO
+          # Mount the ISO (it's a standard file system image, not a cabinet)
           Mount-DiskImage -ImagePath "$env:RUNNER_TEMP\vista_sdk.iso"
           $drive = (Get-DiskImage -ImagePath "$env:RUNNER_TEMP\vista_sdk.iso" | Get-Volume).DriveLetter
           Write-Host "Mounted at ${drive}:"
-          Get-ChildItem "${drive}:\\"
+          Get-ChildItem "${drive}:\\" | ForEach-Object { Write-Host "  $($_.Name)" }
 
-          # The SDK files are in a cabinet on the DVD. Find it.
-          $cab = Get-ChildItem "${drive}:\\" -Filter "*.cab" -Recurse | Sort-Object Length -Descending | Select-Object -First 1
-          if (-not $cab) {
-            # Some ISOs have the files directly (no cabinet)
-            Write-Host "No cabinet found. Checking for direct Include/Lib dirs..."
-            if (Test-Path "${drive}:\Include") {
-              New-Item -ItemType Directory -Force -Path sdk-v6.1
-              Copy-Item -Recurse "${drive}:\Include" "sdk-v6.1\Include"
-              Copy-Item -Recurse "${drive}:\Lib" "sdk-v6.1\Lib"
-              Copy-Item -Recurse "${drive}:\bin" "sdk-v6.1\bin"
-              Dismount-DiskImage -ImagePath "$env:RUNNER_TEMP\vista_sdk.iso"
-              Remove-Item "$env:RUNNER_TEMP\vista_sdk.iso" -Force
-              return
-            }
-            Write-Error "Could not find SDK files on ${drive}:"
-            exit 1
-          }
-          Write-Host "CAB: $($cab.FullName) ($([math]::Round($cab.Length/1MB,1)) MB)"
-
-          # Extract Include, Lib, and bin from the cabinet
+          # Copy directly from the mounted file system
           New-Item -ItemType Directory -Force -Path sdk-v6.1
-          7z x $cab.FullName "Include" -o"sdk-v6.1" -y
-          7z x $cab.FullName "Lib" -o"sdk-v6.1" -y
-          7z x $cab.FullName "bin" -o"sdk-v6.1" -y
+          Copy-Item -Recurse "${drive}:\Include" "sdk-v6.1\Include"
+          Copy-Item -Recurse "${drive}:\Lib" "sdk-v6.1\Lib"
+          Copy-Item -Recurse "${drive}:\Bin" "sdk-v6.1\Bin"
 
           Dismount-DiskImage -ImagePath "$env:RUNNER_TEMP\vista_sdk.iso"
           Remove-Item "$env:RUNNER_TEMP\vista_sdk.iso" -Force
 
           # Verify
           if (-not (Test-Path "sdk-v6.1\Include\windows.h")) {
-            Write-Host "Contents:"
-            Get-ChildItem "sdk-v6.1" -Recurse -Depth 2 | Select-Object -First 30 | ForEach-Object { Write-Host "  $($_.FullName)" }
-            Write-Error "windows.h not found in extracted SDK"
+            Write-Host "Contents of sdk-v6.1\Include:"
+            Get-ChildItem "sdk-v6.1\Include" -Depth 1 | Select-Object -First 20 | ForEach-Object { Write-Host "  $($_.Name)" }
+            Write-Error "windows.h not found"
             exit 1
           }
-          Write-Host "Vista SDK extracted: Include/, Lib/, bin/"
+          Write-Host "Vista SDK ready: $((Get-ChildItem 'sdk-v6.1' -Recurse -File | Measure-Object Length -Sum).Sum / 1MB) MB"
 
       - name: Save Vista SDK cache
         if: steps.sdk-cache.outputs.cache-hit != 'true'
