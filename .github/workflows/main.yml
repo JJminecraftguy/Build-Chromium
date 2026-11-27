@@ -9,36 +9,13 @@ jobs:
     timeout-minutes: 360
 
     steps:
-      # ── 1. Free disk space ──────────────────────────────────────
-      - name: Remove pre-installed toolchains
-        shell: pwsh
-        run: |
-          Remove-Item -Recurse -Force "C:\Program Files\Microsoft Visual Studio\2022" -ErrorAction SilentlyContinue
-          Remove-Item -Recurse -Force "C:\Android" -ErrorAction SilentlyContinue
-          Remove-Item -Recurse -Force "C:\Program Files\dotnet" -ErrorAction SilentlyContinue
-          Remove-Item -Recurse -Force "$env:AGENT_TOOLSDIRECTORY" -ErrorAction SilentlyContinue
-          Remove-Item -Recurse -Force "C:\Program Files\Google\Chrome" -ErrorAction SilentlyContinue
-          Remove-Item -Recurse -Force "C:\Program Files (x86)\Microsoft\EdgeCore" -ErrorAction SilentlyContinue
-          Remove-Item -Recurse -Force "C:\Program Files\Mozilla Firefox" -ErrorAction SilentlyContinue
-          Remove-Item -Recurse -Force "C:\Program Files\Java" -ErrorAction SilentlyContinue
-          Remove-Item -Recurse -Force "C:\Program Files\Eclipse Adoptium" -ErrorAction SilentlyContinue
-          Write-Host "Freed space:"
-          Get-PSDrive C | Select-Object Used, Free
-
-      # ── 2. Enable .NET 3.5 ──────────────────────────────────────
-      - name: Enable .NET 3.5
-        shell: pwsh
-        run: |
-          DISM /Online /Enable-Feature /FeatureName:NetFx3 /All /NoRestart
-          Write-Host ".NET 3.5 enabled"
-          
-      # ── 1. Install Go (required by setup-msvc v1.1.0) ──────────
+      # ── 1. Setup Go (required by setup-msvc v1.1.0) ────────────
       - name: Setup Go
         uses: actions/setup-go@v5
         with:
           go-version: 'stable'
 
-      # ── 1. Setup MSVC 2005 SP1 (minimal components) ────────────
+      # ── 2. Setup MSVC 2005 SP1 ─────────────────────────────────
       - name: Setup MSVC 2005 SP1
         uses: jaenster/setup-msvc@v1
         with:
@@ -48,8 +25,90 @@ jobs:
         shell: pwsh
         run: cl.exe /?
 
+      # ── 3. Windows Vista SDK (v6.0/6.1) ────────────────────────
+      - name: Cache Vista SDK
+        id: sdk-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: sdk-v6.1
+          key: vista-sdk-6.1.6000.16384
+
+      - name: Download & extract Vista SDK
+        if: steps.sdk-cache.outputs.cache-hit != 'true'
+        shell: pwsh
+        run: |
+          curl.exe -L -o "$env:RUNNER_TEMP\vista_sdk.iso" `
+            "http://download.microsoft.com/download/4/2/6/42684501-9ec5-43dd-9dfe-c8c9dfa6a66f/6.1.6000.16384.10.WindowsSDK_Vista_Feb2007Update_rtm.DVD.Rel.iso"
+          $size = (Get-Item "$env:RUNNER_TEMP\vista_sdk.iso").Length / 1GB
+          Write-Host "Downloaded: $size GB"
+          if ($size -lt 1.0) {
+            Write-Error "ISO too small — likely an error page"
+            exit 1
+          }
+
+          # Mount the ISO
+          Mount-DiskImage -ImagePath "$env:RUNNER_TEMP\vista_sdk.iso"
+          $drive = (Get-DiskImage -ImagePath "$env:RUNNER_TEMP\vista_sdk.iso" | Get-Volume).DriveLetter
+          Write-Host "Mounted at ${drive}:"
+          Get-ChildItem "${drive}:\\"
+
+          # The SDK files are in a cabinet on the DVD. Find it.
+          $cab = Get-ChildItem "${drive}:\\" -Filter "*.cab" -Recurse | Sort-Object Length -Descending | Select-Object -First 1
+          if (-not $cab) {
+            # Some ISOs have the files directly (no cabinet)
+            Write-Host "No cabinet found. Checking for direct Include/Lib dirs..."
+            if (Test-Path "${drive}:\Include") {
+              New-Item -ItemType Directory -Force -Path sdk-v6.1
+              Copy-Item -Recurse "${drive}:\Include" "sdk-v6.1\Include"
+              Copy-Item -Recurse "${drive}:\Lib" "sdk-v6.1\Lib"
+              Copy-Item -Recurse "${drive}:\bin" "sdk-v6.1\bin"
+              Dismount-DiskImage -ImagePath "$env:RUNNER_TEMP\vista_sdk.iso"
+              Remove-Item "$env:RUNNER_TEMP\vista_sdk.iso" -Force
+              return
+            }
+            Write-Error "Could not find SDK files on ${drive}:"
+            exit 1
+          }
+          Write-Host "CAB: $($cab.FullName) ($([math]::Round($cab.Length/1MB,1)) MB)"
+
+          # Extract Include, Lib, and bin from the cabinet
+          New-Item -ItemType Directory -Force -Path sdk-v6.1
+          7z x $cab.FullName "Include" -o"sdk-v6.1" -y
+          7z x $cab.FullName "Lib" -o"sdk-v6.1" -y
+          7z x $cab.FullName "bin" -o"sdk-v6.1" -y
+
+          Dismount-DiskImage -ImagePath "$env:RUNNER_TEMP\vista_sdk.iso"
+          Remove-Item "$env:RUNNER_TEMP\vista_sdk.iso" -Force
+
+          # Verify
+          if (-not (Test-Path "sdk-v6.1\Include\windows.h")) {
+            Write-Host "Contents:"
+            Get-ChildItem "sdk-v6.1" -Recurse -Depth 2 | Select-Object -First 30 | ForEach-Object { Write-Host "  $($_.FullName)" }
+            Write-Error "windows.h not found in extracted SDK"
+            exit 1
+          }
+          Write-Host "Vista SDK extracted: Include/, Lib/, bin/"
+
+      - name: Save Vista SDK cache
+        if: steps.sdk-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: sdk-v6.1
+          key: vista-sdk-6.1.6000.16384
+
+      - name: Set Vista SDK env vars
+        shell: pwsh
+        run: |
+          echo "PLATFORMSDK_6_1=$PWD\sdk-v6.1" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          echo "INCLUDE=$PWD\sdk-v6.1\Include;$($env:INCLUDE)" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          echo "LIB=$PWD\sdk-v6.1\Lib;$($env:LIB)" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          echo "PATH=$PWD\sdk-v6.1\bin;$($env:PATH)" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          Write-Host "SDK at: $env:PLATFORMSDK_6_1"
+
+      # ── 4. DirectX 9.0c SDK headers (Dec 2006) ─────────────────
       - name: Cache DX9 headers
-        uses: actions/cache@v4
+        id: cache-dx9
+        uses: actions/cache/restore@v4
         with:
           path: dx9-sdk
           key: dx9-sdk-dec2006
@@ -65,7 +124,7 @@ jobs:
           # Step 1: Extract the inner .cab from the PE self-extractor
           7z x "$env:RUNNER_TEMP\dxsdk_dec2006.exe" -o"$env:RUNNER_TEMP\dx_cab" -y
 
-          # Find the cab (it may be named CABINET or have an extension)
+          # Find the cab
           $cab = Get-ChildItem "$env:RUNNER_TEMP\dx_cab" -Filter "*.cab" -Recurse | Select-Object -First 1
           if (-not $cab) {
             $cab = Get-ChildItem "$env:RUNNER_TEMP\dx_cab" -Recurse | Where-Object { $_.Length -gt 100MB } | Select-Object -First 1
@@ -79,28 +138,210 @@ jobs:
           # Cleanup
           Remove-Item "$env:RUNNER_TEMP\dxsdk_dec2006.exe" -Force
           Remove-Item "$env:RUNNER_TEMP\dx_cab" -Recurse -Force
-
-          # Move to cache path
           Move-Item "$env:RUNNER_TEMP\dx" "dx9-sdk"
 
           # Verify
           $d3d9 = Get-ChildItem "dx9-sdk" -Recurse -Filter "d3d9.h" | Select-Object -First 1
-          if ($d3d9) {
-            Write-Host "Found d3d9.h at: $($d3d9.FullName)"
-          } else {
-            Write-Host "d3d9.h NOT found. Contents:"
-            Get-ChildItem "dx9-sdk" -Recurse -Depth 2 | ForEach-Object { Write-Host "  $($_.FullName)" }
+          if (-not $d3d9) {
+            Write-Error "d3d9.h NOT found"
             exit 1
           }
+          Write-Host "Found d3d9.h at: $($d3d9.FullName)"
+
+      - name: Save DX9 cache
+        if: steps.cache-dx9.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: dx9-sdk
+          key: dx9-sdk-dec2006
 
       - name: Set DX9 env vars
         shell: pwsh
         run: |
           echo "INCLUDE=$PWD\dx9-sdk\Include;$($env:INCLUDE)" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           echo "LIB=$PWD\dx9-sdk\Lib;$($env:LIB)" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-          Test-Path "$PWD\dx9-sdk\Include\d3d9.h"
-          
-      # ── 3. Clone Chromium ───────────────────────────────────────
+
+      # ── 5. Fetch Chromium dependencies ─────────────────────────
+
+      # --- Breakpad ---
+      - name: Restore Breakpad cache
+        id: breakpad-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: src/breakpad/src
+          key: breakpad-2d7664e8d477816e0641e822752f63982c1be74f
+
+      - name: Clone Breakpad (if not cached)
+        if: steps.breakpad-cache.outputs.cache-hit != 'true'
+        shell: pwsh
+        run: |
+          git clone --filter=blob:none --no-tags --single-branch -b main --no-checkout https://github.com/google/breakpad.git breakpad
+          cd breakpad
+          git checkout 2d7664e8d477816e0641e822752f63982c1be74f
+          git gc --aggressive --prune=now
+          cd ..
+          Remove-Item -Recurse -Force breakpad\.git
+          New-Item -ItemType Directory -Force -Path src\breakpad
+          Move-Item -Path breakpad -Destination src\breakpad\src
+
+      - name: Save Breakpad cache
+        if: steps.breakpad-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: src/breakpad/src
+          key: breakpad-2d7664e8d477816e0641e822752f63982c1be74f
+
+      # --- Googletest ---
+      - name: Restore Googletest cache
+        id: gtest-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: src/testing/gtest
+          key: googletest-26ddf828fa2870982315f4dc8dd4f6e4777f4d29
+
+      - name: Clone Googletest (if not cached)
+        if: steps.gtest-cache.outputs.cache-hit != 'true'
+        shell: pwsh
+        run: |
+          git clone --filter=blob:none --no-tags --single-branch -b master --no-checkout https://github.com/stp/googletest.git googletest
+          cd googletest
+          git checkout 26ddf828fa2870982315f4dc8dd4f6e4777f4d29
+          git gc --aggressive --prune=now
+          cd ..
+          Remove-Item -Recurse -Force googletest\.git
+          New-Item -ItemType Directory -Force -Path src\testing
+          Move-Item -Path googletest -Destination src\testing\gtest
+
+      - name: Save Googletest cache
+        if: steps.gtest-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: src/testing/gtest
+          key: googletest-26ddf828fa2870982315f4dc8dd4f6e4777f4d29
+
+      # --- V8 ---
+      - name: Restore V8 cache
+        id: v8-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: src/v8
+          key: v8-4de96712f4295f4e5deaadc5d8a7429889eee00b
+
+      - name: Clone V8 (if not cached)
+        if: steps.v8-cache.outputs.cache-hit != 'true'
+        shell: pwsh
+        run: |
+          git clone --filter=blob:none --no-tags --single-branch -b main --no-checkout https://chromium.googlesource.com/v8/v8.git v8
+          cd v8
+          git checkout 4de96712f4295f4e5deaadc5d8a7429889eee00b
+          git gc --aggressive --prune=now
+          cd ..
+          Remove-Item -Recurse -Force v8\.git
+          New-Item -ItemType Directory -Force -Path src
+          Move-Item -Path v8 -Destination src\v8
+
+      - name: Save V8 cache
+        if: steps.v8-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: src/v8
+          key: v8-4de96712f4295f4e5deaadc5d8a7429889eee00b
+
+      # --- WebKit LayoutTests ---
+      - name: Restore WebKit cache
+        id: webkit-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: src/webkit/data/layout_tests
+          key: webkit-safari31-r31256
+
+      - name: Clone WebKit LayoutTests (if not cached)
+        if: steps.webkit-cache.outputs.cache-hit != 'true'
+        shell: pwsh
+        run: |
+          git clone --filter=blob:none --no-tags --single-branch -b Safari-3-1-branch --no-checkout https://chromium.googlesource.com/external/Webkit WebKit
+          cd WebKit
+          git checkout d48ae3e98a7de1e687103a8a172d911bf764a90a -- LayoutTests
+          cd ..
+          New-Item -ItemType Directory -Force -Path src\webkit\data
+          Move-Item -Path WebKit\LayoutTests -Destination src\webkit\data\layout_tests
+          Remove-Item -Recurse -Force WebKit
+
+      - name: Save WebKit cache
+        if: steps.webkit-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: src/webkit/data/layout_tests
+          key: webkit-safari31-r31256
+
+      # --- Google URL (svndump) ---
+      - name: Restore Google URL cache
+        id: googleurl-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: src/googleurl
+          key: googleurl-r92
+
+      - name: Setup SVN
+        if: steps.googleurl-cache.outputs.cache-hit != 'true'
+        uses: AmpScm/setup-subversion@v1
+
+      - name: Fetch Google URL (if not cached)
+        if: steps.googleurl-cache.outputs.cache-hit != 'true'
+        shell: pwsh
+        run: |
+          Invoke-WebRequest -Uri "https://storage.googleapis.com/google-code-archive-source/v2/code.google.com/google-url/repo.svndump.gz" -OutFile "$env:RUNNER_TEMP\google-url.svndump.gz"
+          7z x "$env:RUNNER_TEMP\google-url.svndump.gz" -o"$env:RUNNER_TEMP" -y
+          svnadmin create "$env:RUNNER_TEMP\google-url-svn"
+          cmd /c "svnadmin load ""$env:RUNNER_TEMP\google-url-svn"" < ""$env:RUNNER_TEMP\google-url.svndump"""
+          New-Item -ItemType Directory -Force -Path src
+          svn checkout "file:///$($env:RUNNER_TEMP.Replace('\','/'))/google-url-svn/trunk@92" src\googleurl
+
+      - name: Save Google URL cache
+        if: steps.googleurl-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: src/googleurl
+          key: googleurl-r92
+
+      # --- ICU 3.8.1 ---
+      - name: Restore ICU cache
+        id: icu-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: src/third_party/icu38
+          key: icu38-3.8.1
+
+      - name: Fetch ICU 3.8.1 (if not cached)
+        if: steps.icu-cache.outputs.cache-hit != 'true'
+        shell: pwsh
+        run: |
+          curl.exe -L -o "$env:RUNNER_TEMP\icu4c-3_8_1-src.tgz" "https://downloads.sourceforge.net/project/icu/ICU4C/3.8.1/icu4c-3_8_1-src.tgz"
+          7z x "$env:RUNNER_TEMP\icu4c-3_8_1-src.tgz" -o"$env:RUNNER_TEMP\icu" -y
+          7z x "$env:RUNNER_TEMP\icu\icu4c-3_8_1-src.tar" -o"$env:RUNNER_TEMP\icu" -y
+
+          $src = "$env:RUNNER_TEMP\icu\icu\source"
+          New-Item -ItemType Directory -Force -Path src\third_party\icu38\public
+          Copy-Item -Recurse "$src\common" src\third_party\icu38\public\common
+          Copy-Item -Recurse "$src\i18n" src\third_party\icu38\public\i18n
+          Move-Item -Path $src -Destination src\third_party\icu38\source
+
+          if (-not (Test-Path "src\third_party\icu38\source\data\in\icudt38l.dat")) {
+            throw "icudt38l.dat not found in source tree"
+          }
+          Write-Host ">>> icudt38l.dat present: $((Get-Item 'src\third_party\icu38\source\data\in\icudt38l.dat').Length) bytes"
+
+          curl.exe -L -o "src\third_party\icu38\icu38_main.scons" "https://raw.githubusercontent.com/JJminecraftguy/Build-Chromium/main/icu38_main.scons"
+          Remove-Item -Recurse -Force "$env:RUNNER_TEMP\icu"
+
+      - name: Save ICU cache
+        if: steps.icu-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: src/third_party/icu38
+          key: icu38-3.8.1
+
+      # ── 6. Clone Chromium ──────────────────────────────────────
       - name: Clone Chromium @ 4db48af7
         uses: actions/checkout@v4
         with:
@@ -115,12 +356,14 @@ jobs:
           Get-Content "chromium\chrome\VERSION" -ErrorAction SilentlyContinue
           Get-ChildItem "chromium" -Name | Select-Object -First 20
 
-      # ── 4. (Placeholder) Build ──────────────────────────────────
+      # ── 7. Build ───────────────────────────────────────────────
       - name: Build (placeholder)
         shell: pwsh
         run: |
           Write-Host "TODO: add build steps"
-          # You'll need:
-          #   - Python 2.7 (not pre-installed)
-          #   - The correct SCons entry point for this commit
-          #   - Third-party deps (WebKit, V8, etc.)
+          # The SConscript expects:
+          #   - PLATFORMSDK_6_1 → set above (points to sdk-v6.1/)
+          #   - MSVS_VERSION = '8.0' (set by SConscript.main)
+          #   - Visual Studio at C:\Program Files (x86)\Microsoft Visual Studio 8
+          #   - Python 2.4 from chromium/third_party/python_24
+          #   - All deps under src/ (breakpad, gtest, v8, icu38, googleurl, webkit)
