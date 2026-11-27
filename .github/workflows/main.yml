@@ -380,18 +380,30 @@ jobs:
           $f = "build\SConscript.main"
           $content = Get-Content $f -Raw
 
-          # Force MSVC 2005 bin into SCons subprocess PATH (after msvs detection)
+          $sdkBase = "$env:GITHUB_WORKSPACE\chromium\third_party\platformsdk_vista_6_0\files"
+          $insertLines = @(
+            "  # Force MSVC 2005 paths into SCons subprocess environment",
+            "  _msvc_bin = r'C:\Program Files\Microsoft Visual Studio 8\VC\bin'",
+            "  _msvc_inc = r'C:\Program Files\Microsoft Visual Studio 8\VC\include'",
+            "  _msvc_lib = r'C:\Program Files\Microsoft Visual Studio 8\VC\lib'",
+            "  _sdk_inc  = r'$sdkBase\Include'",
+            "  _sdk_lib  = r'$sdkBase\Lib'",
+            "  env['ENV']['PATH'] = _msvc_bin + ';' + env['ENV']['PATH']",
+            "  env['ENV']['INCLUDE'] = _msvc_inc + ';' + _sdk_inc + ';' + env['ENV']['INCLUDE']",
+            "  env['ENV']['LIB'] = _msvc_lib + ';' + _sdk_lib + ';' + env['ENV']['LIB']",
+            ""
+          )
+          $insert = $insertLines -join "`n"
+
           $anchor = "  # Force scons to handle long include lines correctly."
-          $insert = "  # Force MSVC 2005 bin into subprocess PATH`n  _msvc_bin = r'C:\Program Files\Microsoft Visual Studio 8\VC\bin'`n  env['ENV']['PATH'] = _msvc_bin + ';' + env['ENV']['PATH']`n`n"
           if ($content.Contains($anchor)) {
             $content = $content.Replace($anchor, $insert + $anchor)
           } else {
-            Write-Error "Anchor not found in SConscript.main"
+            Write-Error "Anchor not found"
             exit 1
           }
           Set-Content $f $content -NoNewline
 
-          # Generate patch from diff
           & "C:\Program Files\Git\bin\git.exe" diff > "$env:GITHUB_WORKSPACE\patch.patch"
           Write-Host "Generated patch:"
           Get-Content "$env:GITHUB_WORKSPACE\patch.patch"
