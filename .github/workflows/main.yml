@@ -496,6 +496,21 @@ jobs:
           [System.IO.File]::WriteAllLines("$PWD\SConstruct", $lines)
           Get-Content "SConstruct"
 
+      - name: Diagnose V8 SCons targets
+        shell: pwsh
+        run: |
+          Set-Location "$env:GITHUB_WORKSPACE\chromium\v8"
+
+          Write-Host "V8 revision:"
+          git log -1 --format="%H %s"
+
+          Write-Host "Checking SCons targets:"
+          & $env:PYTHON ..\third_party\scons\scons.py -Q os=win32 -h
+
+          Write-Host "Checking V8 build files:"
+          Get-ChildItem -Recurse -Include SConstruct,SConscript |
+            Select-Object -ExpandProperty FullName
+
       - name: Build Chromium
         shell: pwsh
         run: |
