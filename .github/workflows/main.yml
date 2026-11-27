@@ -298,15 +298,14 @@ jobs:
           Get-Content "chromium\chrome\VERSION" -ErrorAction SilentlyContinue
           Get-ChildItem "chromium" -Name | Select-Object -First 20
 
-      - name: Check for e2embed usage
+      - name: Check for bundled SDK
         shell: pwsh
         run: |
-          $hits = Get-ChildItem "chromium" -Recurse -Include "*.cc","*.h","SConscript*" -ErrorAction SilentlyContinue |
-            Select-String -Pattern "e2embed" -SimpleMatch
-          if ($hits) {
-            $hits | ForEach-Object { Write-Host "$($_.Path):$($_.LineNumber): $($_.Line.Trim())" }
+          if (Test-Path "chromium\third_party\platformsdk_win2008_6_1") {
+            Write-Host "Bundled SDK found in-tree:"
+            Get-ChildItem "chromium\third_party\platformsdk_win2008_6_1" -Recurse -Depth 1 | Select-Object -First 20 | ForEach-Object { Write-Host "  $($_.Name)" }
           } else {
-            Write-Host "e2embed NOT referenced in source — Vista SDK may not be needed"
+            Write-Host "No bundled SDK in tree — will use external PLATFORMSDK_6_1"
           }
 
       # ── 7. Build ───────────────────────────────────────────────
