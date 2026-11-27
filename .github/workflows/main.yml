@@ -580,6 +580,7 @@ jobs:
             "",
             "env = env.Clone()",
             "",
+            "# Locate the MSVC 2005 compiler.",
             "_msvc_bin = os.environ.get('MSVC_BIN')",
             "if not _msvc_bin:",
             "  _msvc_root = os.environ.get('MSVC_ROOT')",
@@ -587,7 +588,11 @@ jobs:
             "    _msvc_bin = os.path.join(_msvc_root, 'bin')",
             "",
             "if _msvc_bin:",
-            "  env['ENV']['PATH'] = _msvc_bin + os.pathsep + os.environ.get('PATH', '')",
+            "  # Make cl.exe available to nested SCons processes.",
+            "  os.environ['PATH'] = _msvc_bin + os.pathsep + os.environ.get('PATH', '')",
+            "  _build_env = env['ENV'].copy()",
+            "  _build_env['PATH'] = _msvc_bin + os.pathsep + _build_env.get('PATH', os.environ.get('PATH', ''))",
+            "  env['ENV'] = _build_env",
             ""
           )
 
