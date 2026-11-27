@@ -449,7 +449,22 @@ jobs:
           )
           [System.IO.File]::WriteAllLines("$PWD\SConstruct", $lines)
           Get-Content "SConstruct"
-          
+
+      - name: Check for windows.h
+        shell: pwsh
+        run: |
+          $sdkInc = "$env:MSVC_ROOT\platform_sdk_include"
+          Write-Host "platform_sdk_include: $sdkInc"
+          Write-Host "Exists: $(Test-Path $sdkInc)"
+          $wh = Get-ChildItem $sdkInc -Filter "windows.h" -Recurse -ErrorAction SilentlyContinue
+          if ($wh) {
+            Write-Host "Found: $($wh.FullName)"
+          } else {
+            Write-Host "windows.h NOT in platform_sdk_include"
+            Write-Host "Top-level contents:"
+            Get-ChildItem $sdkInc -Depth 0 | Select-Object -First 20 | ForEach-Object { Write-Host "  $($_.Name)" }
+          }
+
       - name: Build Chromium
         shell: pwsh
         run: |
