@@ -25,16 +25,7 @@ jobs:
         shell: pwsh
         run: cl.exe /?
 
-      # ── 3. Windows Vista SDK (v6.0/6.1) ────────────────────────
-      - name: Cache Vista SDK
-        id: sdk-cache
-        uses: actions/cache/restore@v4
-        with:
-          path: sdk-v6.1
-          key: vista-sdk-6.1.6000.16384
-
-      - name: Download & extract Vista SDK
-        if: steps.sdk-cache.outputs.cache-hit != 'true'
+      - name: Install Vista SDK
         shell: pwsh
         run: |
           curl.exe -L -o "$env:RUNNER_TEMP\vista_sdk.iso" `
@@ -50,59 +41,43 @@ jobs:
           $drive = (Get-DiskImage -ImagePath "$env:RUNNER_TEMP\vista_sdk.iso" | Get-Volume).DriveLetter
           Write-Host "Mounted at ${drive}:"
 
-          # List all cabinets in Setup/
-          Write-Host "`nSetup/ contents:"
-          Get-ChildItem "${drive}:\Setup" -Filter "*.cab" | ForEach-Object {
-            Write-Host "  $($_.Name) ($([math]::Round($_.Length/1MB,1)) MB)"
-          }
-
-          # Find the cabinet that contains Include/ and Lib/
-          # The main SDK cabinet is typically the largest one, or named "WinSDK-*.cab"
-          $cabs = Get-ChildItem "${drive}:\Setup" -Filter "*.cab" | Sort-Object Length -Descending
-          $found = $false
-
-          foreach ($cab in $cabs) {
-            Write-Host "`nChecking $($cab.Name)..."
-            # List top-level paths in the cabinet
-            $list = 7z l $cab.FullName 2>&1 | Select-String "Include|Lib|Bin" | Select-Object -First 5
-            if ($list) {
-              Write-Host "  Found SDK paths in this cabinet:"
-              $list | ForEach-Object { Write-Host "    $_" }
-              $found = $true
-
-              # Extract Include, Lib, Bin from this cabinet
-              New-Item -ItemType Directory -Force -Path sdk-v6.1
-              7z x $cab.FullName "Include" -o"sdk-v6.1" -y
-              7z x $cab.FullName "Lib" -o"sdk-v6.1" -y
-              7z x $cab.FullName "Bin" -o"sdk-v6.1" -y
-              break
-            }
-          }
-
-          if (-not $found) {
-            Write-Error "No cabinet in ${drive}:\Setup contains Include/Lib/Bin"
-            exit 1
-          }
+          # Run the installer silently (InstallShield)
+          # -q = quiet, -params:ADDLOCAL=ALL = install all features
+          $proc = Start-Process -FilePath "${drive}:\Setup\Setup.Exe" `
+            -ArgumentList "-q -params:ADDLOCAL=ALL" -Wait -PassThru
+          Write-Host "Setup exit code: $($proc.ExitCode)"
 
           Dismount-DiskImage -ImagePath "$env:RUNNER_TEMP\vista_sdk.iso"
           Remove-Item "$env:RUNNER_TEMP\vista_sdk.iso" -Force
 
-          # Verify
-          if (-not (Test-Path "sdk-v6.1\Include\windows.h")) {
-            Write-Host "sdk-v6.1 contents:"
-            Get-ChildItem "sdk-v6.1" -Depth 1 | Select-Object -First 20 | ForEach-Object { Write-Host "  $($_.Name)" }
-            Write-Error "windows.h not found"
+          # The SDK installs to one of these locations (check both)
+          $sdkPath = $null
+          foreach ($p in @(
+            "C:\Program Files\Microsoft SDKs\Windows\v6.1",
+            "C:\Program Files (x86)\Microsoft SDKs\Windows\v6.1",
+            "C:\Program Files\Microsoft SDKs\Windows\v6.0",
+            "C:\Program Files (x86)\Microsoft SDKs\Windows\v6.0"
+          )) {
+            if (Test-Path "$p\Include\windows.h") {
+              $sdkPath = $p
+              break
+            }
+          }
+
+          if (-not $sdkPath) {
+            Write-Host "SDK not found. Checking Program Files:"
+            Get-ChildItem "C:\Program Files\Microsoft SDKs" -ErrorAction SilentlyContinue
+            Get-ChildItem "C:\Program Files (x86)\Microsoft SDKs" -ErrorAction SilentlyContinue
+            Write-Error "Vista SDK installation failed"
             exit 1
           }
-          $totalMB = (Get-ChildItem 'sdk-v6.1' -Recurse -File | Measure-Object Length -Sum).Sum / 1MB
-          Write-Host "Vista SDK ready: $totalMB MB"
 
-      - name: Save Vista SDK cache
-        if: steps.sdk-cache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v4
-        with:
-          path: sdk-v6.1
-          key: vista-sdk-6.1.6000.16384
+          Write-Host "Vista SDK installed at: $sdkPath"
+          Write-Host "  Include: $((Get-ChildItem "$sdkPath\Include" -File | Measure-Object).Count) files"
+          Write-Host "  Lib: $((Get-ChildItem "$sdkPath\Lib" -File | Measure-Object).Count) files"
+
+          # Set env var for the build
+          echo "PLATFORMSDK_6_1=$sdkPath" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
       - name: Set Vista SDK env vars
         shell: pwsh
