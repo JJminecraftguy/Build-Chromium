@@ -25,70 +25,27 @@ jobs:
         shell: pwsh
         run: cl.exe /?
 
-      - name: Extract Vista SDK headers & libs
+      - name: Set PLATFORMSDK_6_1 (from setup-msvc)
         shell: pwsh
         run: |
-          curl.exe -L -o "$env:RUNNER_TEMP\vista_sdk.iso" `
-            "http://download.microsoft.com/download/4/2/6/42684501-9ec5-43dd-9dfe-c8c9dfa6a66f/6.1.6000.16384.10.WindowsSDK_Vista_Feb2007Update_rtm.DVD.Rel.iso"
-          if ((Get-Item "$env:RUNNER_TEMP\vista_sdk.iso").Length / 1GB -lt 1.0) {
-            Write-Error "ISO too small"
+          # The SConscript expects: $PLATFORMSDK_6_1\Include\windows.h
+          # setup-msvc put them at: $MSVC_ROOT\platform_sdk_include\windows.h
+          # Create the expected layout with junctions
+          New-Item -ItemType Directory -Force -Path sdk-v6.1 | Out-Null
+          New-Item -ItemType Junction -Path "sdk-v6.1\Include" -Target "$env:MSVC_ROOT\platform_sdk_include" -Force
+          New-Item -ItemType Junction -Path "sdk-v6.1\Lib" -Target "$env:MSVC_ROOT\platform_sdk_lib" -Force
+
+          # Verify
+          if (-not (Test-Path "sdk-v6.1\Include\windows.h")) {
+            Write-Host "platform_sdk_include contents:"
+            Get-ChildItem "$env:MSVC_ROOT\platform_sdk_include" -Depth 1 | Select-Object -First 20 | ForEach-Object { Write-Host "  $($_.Name)" }
+            Write-Error "windows.h not found in platform_sdk_include"
             exit 1
           }
+          Write-Host "windows.h found at: sdk-v6.1\Include\windows.h"
+          Write-Host "Lib files: $((Get-ChildItem 'sdk-v6.1\Lib' -Filter '*.lib' | Measure-Object).Count)"
 
-          Mount-DiskImage -ImagePath "$env:RUNNER_TEMP\vista_sdk.iso"
-          $drive = (Get-DiskImage -ImagePath "$env:RUNNER_TEMP\vista_sdk.iso" | Get-Volume).DriveLetter
-
-          $headersCab = "${drive}:\Setup\WinSDKBuild-WinSDKBuild_VistaHeaders-common.0.cab"
-          $libsCab    = "${drive}:\Setup\WinSDKBuild-WinSDKBuild_VistaLibs_X86-common.0.cab"
-
-          # Show what's inside so we can see the path structure
-          Write-Host "`nHeaders cabinet contents:"
-          7z l $headersCab
-
-          Write-Host "`nLibs cabinet contents:"
-          7z l $libsCab
-
-          # Extract everything from both (they're tiny)
-          New-Item -ItemType Directory -Force -Path sdk-v6.1
-          7z x $headersCab -o"sdk-v6.1" -y
-          7z x $libsCab -o"sdk-v6.1" -y
-
-          Dismount-DiskImage -ImagePath "$env:RUNNER_TEMP\vista_sdk.iso"
-          Remove-Item "$env:RUNNER_TEMP\vista_sdk.iso" -Force
-
-          # Find where windows.h landed
-          $wh = Get-ChildItem "sdk-v6.1" -Recurse -Filter "windows.h" | Select-Object -First 1
-          if (-not $wh) {
-            Write-Host "sdk-v6.1 tree:"
-            Get-ChildItem "sdk-v6.1" -Recurse -Depth 3 | ForEach-Object { Write-Host "  $($_.FullName)" }
-            Write-Error "windows.h not found"
-            exit 1
-          }
-          Write-Host "`nwindows.h at: $($wh.FullName)"
-
-          # Set PLATFORMSDK_6_1 to the root that the SConscript expects
-          # (the dir that contains Include/ and Lib/ as subdirs)
-          $sdkRoot = $wh.Directory.Parent.FullName
-          Write-Host "SDK root: $sdkRoot"
-          echo "PLATFORMSDK_6_1=$sdkRoot" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-
-          # Also append to INCLUDE and LIB for the compiler
-          $includeDir = $wh.Directory.FullName
-          $libDir = Get-ChildItem "sdk-v6.1" -Recurse -Directory -Filter "Lib" | Select-Object -First 1
-          if ($libDir) {
-            echo "INCLUDE=$includeDir;$($env:INCLUDE)" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-            echo "LIB=$($libDir.FullName);$($env:LIB)" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-          }
-          Write-Host "Done."
-          
-      - name: Set Vista SDK env vars
-        shell: pwsh
-        run: |
           echo "PLATFORMSDK_6_1=$PWD\sdk-v6.1" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-          echo "INCLUDE=$PWD\sdk-v6.1\Include;$($env:INCLUDE)" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-          echo "LIB=$PWD\sdk-v6.1\Lib;$($env:LIB)" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-          echo "PATH=$PWD\sdk-v6.1\bin;$($env:PATH)" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-          Write-Host "SDK at: $env:PLATFORMSDK_6_1"
 
       # ── 4. DirectX 9.0c SDK headers (Dec 2006) ─────────────────
       - name: Cache DX9 headers
