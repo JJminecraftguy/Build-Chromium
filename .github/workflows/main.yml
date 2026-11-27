@@ -25,28 +25,22 @@ jobs:
         shell: pwsh
         run: cl.exe /?
 
-      - name: Set PLATFORMSDK_6_1 (from setup-msvc)
+      - name: Set PLATFORMSDK_6_1
         shell: pwsh
         run: |
-          # The SConscript expects: $PLATFORMSDK_6_1\Include\windows.h
-          # setup-msvc put them at: $MSVC_ROOT\platform_sdk_include\windows.h
-          # Create the expected layout with junctions
+          # Create the expected layout (SConscript looks for $PLATFORMSDK_6_1\Include and \Lib)
           New-Item -ItemType Directory -Force -Path sdk-v6.1 | Out-Null
           New-Item -ItemType Junction -Path "sdk-v6.1\Include" -Target "$env:MSVC_ROOT\platform_sdk_include" -Force
           New-Item -ItemType Junction -Path "sdk-v6.1\Lib" -Target "$env:MSVC_ROOT\platform_sdk_lib" -Force
 
           # Verify
           if (-not (Test-Path "sdk-v6.1\Include\windows.h")) {
-            Write-Host "platform_sdk_include contents:"
-            Get-ChildItem "$env:MSVC_ROOT\platform_sdk_include" -Depth 1 | Select-Object -First 20 | ForEach-Object { Write-Host "  $($_.Name)" }
             Write-Error "windows.h not found in platform_sdk_include"
             exit 1
           }
-          Write-Host "windows.h found at: sdk-v6.1\Include\windows.h"
-          Write-Host "Lib files: $((Get-ChildItem 'sdk-v6.1\Lib' -Filter '*.lib' | Measure-Object).Count)"
-
+          Write-Host "windows.h OK. Lib count: $((Get-ChildItem 'sdk-v6.1\Lib' -Filter '*.lib' | Measure-Object).Count)"
           echo "PLATFORMSDK_6_1=$PWD\sdk-v6.1" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-
+          
       # ── 4. DirectX 9.0c SDK headers (Dec 2006) ─────────────────
       - name: Cache DX9 headers
         id: cache-dx9
@@ -297,16 +291,6 @@ jobs:
         run: |
           Get-Content "chromium\chrome\VERSION" -ErrorAction SilentlyContinue
           Get-ChildItem "chromium" -Name | Select-Object -First 20
-
-      - name: Check for bundled SDK
-        shell: pwsh
-        run: |
-          if (Test-Path "chromium\third_party\platformsdk_win2008_6_1") {
-            Write-Host "Bundled SDK found in-tree:"
-            Get-ChildItem "chromium\third_party\platformsdk_win2008_6_1" -Recurse -Depth 1 | Select-Object -First 20 | ForEach-Object { Write-Host "  $($_.Name)" }
-          } else {
-            Write-Host "No bundled SDK in tree — will use external PLATFORMSDK_6_1"
-          }
 
       # ── 7. Build ───────────────────────────────────────────────
       - name: Build (placeholder)
