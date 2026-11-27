@@ -348,17 +348,18 @@ jobs:
       - name: Create SConstruct wrapper
         shell: pwsh
         run: |
-          Set-Location "chromium"
+          Set-Location "chromium\build"
           @"
-          SConscript('build/SConscript.main')
-          "@ | Out-File -FilePath "SConstruct" -Encoding ascii
+SConscript('SConscript.main')
+"@ | Out-File -FilePath "SConstruct" -Encoding ascii
+          Write-Host "Created build/SConstruct"
 
       - name: Build Chromium
         shell: pwsh
         run: |
           $py = Resolve-Path "$env:PYTHON"
           $scons = Resolve-Path "$env:SCONS_PY"
-          Set-Location "chromium"
+          Set-Location "chromium\build"
           & $py $scons -j4
           if ($LASTEXITCODE -ne 0) {
             exit $LASTEXITCODE
