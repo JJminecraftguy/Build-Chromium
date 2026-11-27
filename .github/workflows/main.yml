@@ -398,7 +398,7 @@ jobs:
           Set-Location "chromium\build"
           $lines = @(
             "build_component = ARGUMENTS.get('build_component', 'chrome')",
-            "SConscript('SConscript.main')"
+            "SConscript('SConscript.main', exports=['build_component'])"
           )
           [System.IO.File]::WriteAllLines("$PWD\SConstruct", $lines)
           Get-Content "SConstruct"
