@@ -320,31 +320,30 @@ jobs:
           if (-not (Test-Path $py)) {
             $py = Get-ChildItem "chromium\third_party\python_24" -Recurse -Filter "python.exe" | Select-Object -First 1
             if (-not $py) {
-              Write-Error "python.exe not found in chromium\third_party\python_24"
+              Write-Error "python.exe not found"
               exit 1
             }
             $py = $py.FullName
           }
           & $py -V
-          echo "PYTHON=$py" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-          Write-Host "Python at: $py"
+          # Store as absolute path so & works in subsequent steps
+          echo "PYTHON=$(Resolve-Path $py)" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          Write-Host "Python at: $(Resolve-Path $py)"
 
       - name: Verify SCons
         shell: pwsh
         run: |
-          # SCons is vendored in the repo
           $scons = Get-ChildItem "chromium\third_party\scons" -Recurse -Filter "scons.py" -ErrorAction SilentlyContinue | Select-Object -First 1
           if (-not $scons) {
-            # Try other locations
             $scons = Get-ChildItem "chromium" -Recurse -Filter "scons.py" -Depth 3 -ErrorAction SilentlyContinue | Select-Object -First 1
           }
           if (-not $scons) {
-            Write-Error "scons.py not found in chromium tree"
+            Write-Error "scons.py not found"
             exit 1
           }
-          echo "SCONS_PY=$($scons.FullName)" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-          Write-Host "SCons at: $($scons.FullName)"
-
+          echo "SCONS_PY=$(Resolve-Path $scons.FullName)" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          Write-Host "SCons at: $(Resolve-Path $scons.FullName)"
+          
       # ── 8. Build ───────────────────────────────────────────────
       - name: Build Chromium
         shell: pwsh
