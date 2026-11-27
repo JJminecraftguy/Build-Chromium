@@ -354,14 +354,23 @@ jobs:
           "@ | Out-File -FilePath "SConstruct" -Encoding ascii
           Write-Host "Created build/SConstruct"
 
-      - name: Find TypeLibrary definition
+      - name: Check for midl.exe
         shell: pwsh
         run: |
-          Set-Location "chromium"
-          $hits = Get-ChildItem "build","chrome" -Recurse -Include "*.py","SConscript*" -ErrorAction SilentlyContinue |
-            Select-String -Pattern "TypeLibrary" -SimpleMatch
-          $hits | ForEach-Object { Write-Host "$($_.Path.Replace((Get-Location).Path + '\','')):$($_.LineNumber): $($_.Line.Trim())" }
-
+          $midl = Get-ChildItem "$env:MSVC_ROOT" -Recurse -Filter "midl.exe" -ErrorAction SilentlyContinue
+          if ($midl) {
+            $midl | ForEach-Object { Write-Host "Found: $($_.FullName)" }
+          } else {
+            Write-Host "midl.exe NOT found in MSVC toolchain"
+            # Check the platform SDK path
+            $midl2 = Get-ChildItem "C:\Program Files (x86)\Microsoft SDKs" -Recurse -Filter "midl.exe" -ErrorAction SilentlyContinue
+            if ($midl2) {
+              $midl2 | ForEach-Object { Write-Host "Found in SDKs: $($_.FullName)" }
+            } else {
+              Write-Host "midl.exe not found anywhere"
+            }
+          }
+          
       - name: Build Chromium
         shell: pwsh
         run: |
