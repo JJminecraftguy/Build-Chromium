@@ -390,7 +390,7 @@ jobs:
           $msvcRoot = $env:MSVC_ROOT
           $insertLines = @(
             "  # Force MSVC 2005 paths into SCons subprocess environment",
-            "  _msvc_bin = r'C:\Program Files\Microsoft Visual Studio 8\VC\bin'",
+            "  "_msvc_bin = r'$msvcRoot\bin'",
             "  _msvc_inc = r'$msvcRoot\include'",
             "  _msvc_lib = r'$msvcRoot\lib'",
             "  _sdk_inc  = r'$msvcRoot\platform_sdk_include'",
@@ -568,10 +568,31 @@ jobs:
         shell: pwsh
         run: |
           $env:VSINSTALLDIR = "C:\Program Files\Microsoft Visual Studio 8"
+
+          # Explicitly expose MSVC 2005 to Chromium and nested V8 SCons.
+          $env:PATH = "$env:MSVC_ROOT\bin;$env:PATH"
+          $env:INCLUDE = "$env:MSVC_ROOT\include;$env:INCLUDE"
+          $env:LIB = "$env:MSVC_ROOT\lib;$env:LIB"
+
+          Write-Host "=== Compiler location ==="
+          where.exe cl.exe
+          if ($LASTEXITCODE -ne 0) {
+            throw "MSVC compiler is not on PATH"
+          }
+
+          Write-Host "=== Compiler version ==="
+          cl.exe /?
+
+          Write-Host "=== Python ==="
           $py = Resolve-Path "$env:PYTHON"
+
+          Write-Host "=== SCons ==="
           $scons = Resolve-Path "$env:SCONS_PY"
+
           Set-Location "chromium\build"
+
           & $py $scons -j4 build_component=chrome os=win32
+
           if ($LASTEXITCODE -ne 0) {
             exit $LASTEXITCODE
           }
