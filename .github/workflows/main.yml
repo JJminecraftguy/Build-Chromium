@@ -369,14 +369,14 @@ jobs:
           $f = "build\SConscript.main"
           $content = Get-Content $f -Raw
 
-          $sdkBase = "$env:GITHUB_WORKSPACE\chromium\third_party\platformsdk_vista_6_0\files"
+          $msvcRoot = $env:MSVC_ROOT
           $insertLines = @(
             "  # Force MSVC 2005 paths into SCons subprocess environment",
             "  _msvc_bin = r'C:\Program Files\Microsoft Visual Studio 8\VC\bin'",
-            "  _msvc_inc = r'C:\Program Files\Microsoft Visual Studio 8\VC\include'",
-            "  _msvc_lib = r'C:\Program Files\Microsoft Visual Studio 8\VC\lib'",
-            "  _sdk_inc  = r'$sdkBase\Include'",
-            "  _sdk_lib  = r'$sdkBase\Lib'",
+            "  _msvc_inc = r'$msvcRoot\include'",
+            "  _msvc_lib = r'$msvcRoot\lib'",
+            "  _sdk_inc  = r'$msvcRoot\platform_sdk_include'",
+            "  _sdk_lib  = r'$msvcRoot\platform_sdk_lib'",
             "  env['ENV']['PATH'] = _msvc_bin + ';' + env['ENV']['PATH']",
             "  env['ENV']['INCLUDE'] = _msvc_inc + ';' + _sdk_inc + ';' + env['ENV']['INCLUDE']",
             "  env['ENV']['LIB'] = _msvc_lib + ';' + _sdk_lib + ';' + env['ENV']['LIB']",
