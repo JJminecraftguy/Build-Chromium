@@ -254,6 +254,40 @@ jobs:
           curl.exe -L -o "src\third_party\icu38\icu38_main.scons" "https://raw.githubusercontent.com/JJminecraftguy/Build-Chromium/main/icu38_main.scons"
           Remove-Item -Recurse -Force "$env:RUNNER_TEMP\icu"
 
+
+      - name: Install ICU Unicode headers
+        shell: pwsh
+        run: |
+          $icuRoot = "$env:GITHUB_WORKSPACE\src\third_party\icu38"
+          $unicodeDir = "$icuRoot\public\common\unicode"
+          $zip = "$env:RUNNER_TEMP\unicode.zip"
+
+          New-Item -ItemType Directory -Force -Path $unicodeDir | Out-Null
+
+          curl.exe -fL --retry 3 -o $zip `
+            "https://raw.githubusercontent.com/JJminecraftguy/Build-Chromium/main/unicode.zip"
+
+          if ($LASTEXITCODE -ne 0) {
+            throw "Failed to download unicode.zip"
+          }
+
+          7z x $zip -o"$unicodeDir" -y
+
+          if ($LASTEXITCODE -ne 0) {
+            throw "Failed to extract unicode.zip"
+          }
+
+          Remove-Item $zip -Force
+
+          if (-not (Test-Path "$unicodeDir\ucnv.h")) {
+            throw "unicode.zip extraction failed: ucnv.h not found"
+          }
+
+          Write-Host "ICU Unicode headers installed."
+          Write-Host "ucnv.h: $unicodeDir\ucnv.h"
+          Write-Host "Header count: $((Get-ChildItem $unicodeDir -Filter '*.h' -File).Count)"
+
+
       - name: Save ICU cache
         if: steps.icu-cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@v4
