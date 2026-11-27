@@ -50,34 +50,33 @@ jobs:
           Dismount-DiskImage -ImagePath "$env:RUNNER_TEMP\vista_sdk.iso"
           Remove-Item "$env:RUNNER_TEMP\vista_sdk.iso" -Force
 
-          # The SDK installs to one of these locations (check both)
-          $sdkPath = $null
-          foreach ($p in @(
-            "C:\Program Files\Microsoft SDKs\Windows\v6.1",
-            "C:\Program Files (x86)\Microsoft SDKs\Windows\v6.1",
-            "C:\Program Files\Microsoft SDKs\Windows\v6.0",
-            "C:\Program Files (x86)\Microsoft SDKs\Windows\v6.0"
-          )) {
-            if (Test-Path "$p\Include\windows.h") {
-              $sdkPath = $p
-              break
+      - name: Find installed SDK
+        shell: pwsh
+        run: |
+          Write-Host "Contents of C:\Program Files (x86)\Microsoft SDKs\Windows:"
+          Get-ChildItem "C:\Program Files (x86)\Microsoft SDKs\Windows" | ForEach-Object { Write-Host "  $($_.Name)" }
+
+          Write-Host "`nSearching for windows.h:"
+          $found = Get-ChildItem "C:\Program Files (x86)\Microsoft SDKs\Windows" -Recurse -Filter "windows.h" -ErrorAction SilentlyContinue
+          if ($found) {
+            $found | ForEach-Object { Write-Host "  $($_.FullName)" }
+            # Use the parent of the Include dir that contains windows.h
+            $sdkRoot = $found[0].Directory.Parent.FullName
+            Write-Host "`nSDK root: $sdkRoot"
+            echo "PLATFORMSDK_6_1=$sdkRoot" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          } else {
+            # Also check 64-bit Program Files
+            $found = Get-ChildItem "C:\Program Files\Microsoft SDKs\Windows" -Recurse -Filter "windows.h" -ErrorAction SilentlyContinue
+            if ($found) {
+              $found | ForEach-Object { Write-Host "  $($_.FullName)" }
+              $sdkRoot = $found[0].Directory.Parent.FullName
+              Write-Host "`nSDK root: $sdkRoot"
+              echo "PLATFORMSDK_6_1=$sdkRoot" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+            } else {
+              Write-Error "windows.h not found anywhere under Microsoft SDKs\Windows"
+              exit 1
             }
           }
-
-          if (-not $sdkPath) {
-            Write-Host "SDK not found. Checking Program Files:"
-            Get-ChildItem "C:\Program Files\Microsoft SDKs" -ErrorAction SilentlyContinue
-            Get-ChildItem "C:\Program Files (x86)\Microsoft SDKs" -ErrorAction SilentlyContinue
-            Write-Error "Vista SDK installation failed"
-            exit 1
-          }
-
-          Write-Host "Vista SDK installed at: $sdkPath"
-          Write-Host "  Include: $((Get-ChildItem "$sdkPath\Include" -File | Measure-Object).Count) files"
-          Write-Host "  Lib: $((Get-ChildItem "$sdkPath\Lib" -File | Measure-Object).Count) files"
-
-          # Set env var for the build
-          echo "PLATFORMSDK_6_1=$sdkPath" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
       - name: Set Vista SDK env vars
         shell: pwsh
