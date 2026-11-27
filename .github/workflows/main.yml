@@ -306,9 +306,19 @@ jobs:
           Copy-Item "C:\Program Files\Git\usr\bin\perl.exe" "third_party\cygwin\bin\perl.exe"
           Set-Location "$env:GITHUB_WORKSPACE\chromium"
           Write-Host "perl: $((Get-Item 'third_party\cygwin\bin\perl.exe').Length) bytes"
+          # Junction external deps into the chromium tree
           New-Item -ItemType Junction -Path "googleurl" -Target "$env:GITHUB_WORKSPACE\src\googleurl" -Force
+
+          # breakpad already exists in the repo — remove and replace with junction
+          if (Test-Path "breakpad") {
+            Write-Host "Existing breakpad/ contents:"
+            Get-ChildItem "breakpad" -Recurse -Depth 1 | ForEach-Object { Write-Host "  $($_.Name)" }
+            Remove-Item "breakpad" -Recurse -Force
+          }
           New-Item -ItemType Junction -Path "breakpad" -Target "$env:GITHUB_WORKSPACE\src\breakpad" -Force
+
           New-Item -ItemType Junction -Path "v8" -Target "$env:GITHUB_WORKSPACE\src\v8" -Force
+          New-Item -ItemType Directory -Force -Path "testing" | Out-Null
           New-Item -ItemType Junction -Path "testing\gtest" -Target "$env:GITHUB_WORKSPACE\src\testing\gtest" -Force
 
       - name: Cache bison
