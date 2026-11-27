@@ -344,13 +344,17 @@ jobs:
       - name: Apply source patches
         shell: pwsh
         run: |
-          Set-Location "chromium"
-          $patch = "..\patch.patch"
+          $patch = "$env:GITHUB_WORKSPACE\patch.patch"
+          Write-Host "Looking for: $patch"
+          Write-Host "Exists: $(Test-Path $patch)"
           if (-not (Test-Path $patch)) {
-            Write-Host "No patch file found"
-            return
+            Write-Host "Repo root contents:"
+            Get-ChildItem $env:GITHUB_WORKSPACE -Name
+            Write-Error "Patch file not found"
+            exit 1
           }
-          & "C:\Program Files\Git\bin\git.exe" apply --verbose $patch
+          Set-Location "$env:GITHUB_WORKSPACE\chromium"
+          & "C:\Program Files\Git\bin\git.exe" apply --verbose "$patch"
           if ($LASTEXITCODE -ne 0) {
             Write-Error "Patch failed"
             exit $LASTEXITCODE
