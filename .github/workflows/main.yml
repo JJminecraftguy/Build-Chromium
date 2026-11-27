@@ -630,6 +630,12 @@ jobs:
             throw "V8 SCONSFLAGS missing"
           }
 
+          $icuRoot = "$env:GITHUB_WORKSPACE\chromium\third_party\icu38"
+
+          Write-Host "=== ICU ucnv.h locations ==="
+          Get-ChildItem $icuRoot -Recurse -Filter ucnv.h -File |
+              Select-Object -ExpandProperty FullName
+
           # ============================================================
           # 9. Generate source patch artifact
           # ============================================================
