@@ -376,6 +376,7 @@ jobs:
             "https://raw.githubusercontent.com/JJminecraftguy/Build-Chromium/main/midl.exe"
           Write-Host "midl.exe: $((Get-Item "$env:MSVC_ROOT\bin\midl.exe").Length) bytes"
 
+
       - name: Apply source patches
         shell: pwsh
         run: |
@@ -420,10 +421,10 @@ jobs:
           $content = [System.IO.File]::ReadAllText($file)
 
           $old = "SCONSFLAGS='-Q --warn=no-deprecated')"
-          $new = "SCONSFLAGS='-Q --warn=no-deprecated os=win32')"
+          $new = "SCONSFLAGS='-Q --warn=no-deprecated os=win32 mode=debug snapshot=on')"
 
           if ($content.Contains($new)) {
-            Write-Host "V8 OS argument already patched."
+            Write-Host "V8 OS, debug mode, and snapshot arguments already patched."
           }
           elseif ($content.Contains($old)) {
             $content = $content.Replace($old, $new)
@@ -445,6 +446,7 @@ jobs:
           & "C:\Program Files\Git\bin\git.exe" diff > "$env:GITHUB_WORKSPACE\patch.patch"
           Write-Host "Generated patch:"
           Get-Content "$env:GITHUB_WORKSPACE\patch.patch"
+
 
       - name: Upload patch artifact
         uses: actions/upload-artifact@v4
