@@ -408,7 +408,7 @@ jobs:
       - name: Build Chromium
         shell: pwsh
         run: |
-          $env:PATH = "$env:MSVC_BIN;$($env:PATH)"
+          $env:VSINSTALLDIR = "C:\Program Files\Microsoft Visual Studio 8"
           $py = Resolve-Path "$env:PYTHON"
           $scons = Resolve-Path "$env:SCONS_PY"
           Set-Location "chromium\build"
