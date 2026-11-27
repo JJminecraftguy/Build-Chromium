@@ -161,6 +161,10 @@ jobs:
         run: |
           curl.exe -L -o "$env:RUNNER_TEMP\icu4c-3_8_1-src.tgz" "https://downloads.sourceforge.net/project/icu/ICU4C/3.8.1/icu4c-3_8_1-src.tgz"
           7z x "$env:RUNNER_TEMP\icu4c-3_8_1-src.tgz" -o"$env:RUNNER_TEMP\icu" -y
+          Write-Host "=== Top-level ==="
+          Get-ChildItem "$env:RUNNER_TEMP\icu" | ForEach-Object { Write-Host $_.Name }
+          Write-Host "=== All directories (depth 2) ==="
+          Get-ChildItem "$env:RUNNER_TEMP\icu" -Recurse -Directory -Depth 2 | ForEach-Object { Write-Host $_.FullName.Replace("$env:RUNNER_TEMP\icu\", "") }
           $sourceDir = Get-ChildItem "$env:RUNNER_TEMP\icu" -Recurse -Directory -Filter "source" | Select-Object -First 1
           if (-not $sourceDir) { throw "Could not find 'source' directory in extracted ICU" }
           Write-Host ">>> Found source at: $($sourceDir.FullName)"
