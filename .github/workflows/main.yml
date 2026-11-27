@@ -25,59 +25,62 @@ jobs:
         shell: pwsh
         run: cl.exe /?
 
-      - name: Install Vista SDK
+      - name: Extract Vista SDK headers & libs
         shell: pwsh
         run: |
           curl.exe -L -o "$env:RUNNER_TEMP\vista_sdk.iso" `
             "http://download.microsoft.com/download/4/2/6/42684501-9ec5-43dd-9dfe-c8c9dfa6a66f/6.1.6000.16384.10.WindowsSDK_Vista_Feb2007Update_rtm.DVD.Rel.iso"
-          $size = (Get-Item "$env:RUNNER_TEMP\vista_sdk.iso").Length / 1GB
-          Write-Host "Downloaded: $size GB"
-          if ($size -lt 1.0) {
-            Write-Error "ISO too small — likely an error page"
+          if ((Get-Item "$env:RUNNER_TEMP\vista_sdk.iso").Length / 1GB -lt 1.0) {
+            Write-Error "ISO too small"
             exit 1
           }
 
           Mount-DiskImage -ImagePath "$env:RUNNER_TEMP\vista_sdk.iso"
           $drive = (Get-DiskImage -ImagePath "$env:RUNNER_TEMP\vista_sdk.iso" | Get-Volume).DriveLetter
-          Write-Host "Mounted at ${drive}:"
 
-          # Run the installer silently (InstallShield)
-          # -q = quiet, -params:ADDLOCAL=ALL = install all features
-          $proc = Start-Process -FilePath "${drive}:\Setup.Exe" `
-            -ArgumentList "-q -params:ADDLOCAL=ALL" -Wait -PassThru
-          Write-Host "Setup exit code: $($proc.ExitCode)"
+          $headersCab = "${drive}:\Setup\WinSDKBuild-WinSDKBuild_VistaHeaders-common.0.cab"
+          $libsCab    = "${drive}:\Setup\WinSDKBuild-WinSDKBuild_VistaLibs_X86-common.0.cab"
+
+          # Show what's inside so we can see the path structure
+          Write-Host "`nHeaders cabinet contents:"
+          7z l $headersCab
+
+          Write-Host "`nLibs cabinet contents:"
+          7z l $libsCab
+
+          # Extract everything from both (they're tiny)
+          New-Item -ItemType Directory -Force -Path sdk-v6.1
+          7z x $headersCab -o"sdk-v6.1" -y
+          7z x $libsCab -o"sdk-v6.1" -y
 
           Dismount-DiskImage -ImagePath "$env:RUNNER_TEMP\vista_sdk.iso"
           Remove-Item "$env:RUNNER_TEMP\vista_sdk.iso" -Force
 
-      - name: Find installed SDK
-        shell: pwsh
-        run: |
-          Write-Host "Contents of C:\Program Files (x86)\Microsoft SDKs\Windows:"
-          Get-ChildItem "C:\Program Files (x86)\Microsoft SDKs\Windows" | ForEach-Object { Write-Host "  $($_.Name)" }
-
-          Write-Host "`nSearching for windows.h:"
-          $found = Get-ChildItem "C:\Program Files (x86)\Microsoft SDKs\Windows" -Recurse -Filter "windows.h" -ErrorAction SilentlyContinue
-          if ($found) {
-            $found | ForEach-Object { Write-Host "  $($_.FullName)" }
-            # Use the parent of the Include dir that contains windows.h
-            $sdkRoot = $found[0].Directory.Parent.FullName
-            Write-Host "`nSDK root: $sdkRoot"
-            echo "PLATFORMSDK_6_1=$sdkRoot" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-          } else {
-            # Also check 64-bit Program Files
-            $found = Get-ChildItem "C:\Program Files\Microsoft SDKs\Windows" -Recurse -Filter "windows.h" -ErrorAction SilentlyContinue
-            if ($found) {
-              $found | ForEach-Object { Write-Host "  $($_.FullName)" }
-              $sdkRoot = $found[0].Directory.Parent.FullName
-              Write-Host "`nSDK root: $sdkRoot"
-              echo "PLATFORMSDK_6_1=$sdkRoot" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-            } else {
-              Write-Error "windows.h not found anywhere under Microsoft SDKs\Windows"
-              exit 1
-            }
+          # Find where windows.h landed
+          $wh = Get-ChildItem "sdk-v6.1" -Recurse -Filter "windows.h" | Select-Object -First 1
+          if (-not $wh) {
+            Write-Host "sdk-v6.1 tree:"
+            Get-ChildItem "sdk-v6.1" -Recurse -Depth 3 | ForEach-Object { Write-Host "  $($_.FullName)" }
+            Write-Error "windows.h not found"
+            exit 1
           }
+          Write-Host "`nwindows.h at: $($wh.FullName)"
 
+          # Set PLATFORMSDK_6_1 to the root that the SConscript expects
+          # (the dir that contains Include/ and Lib/ as subdirs)
+          $sdkRoot = $wh.Directory.Parent.FullName
+          Write-Host "SDK root: $sdkRoot"
+          echo "PLATFORMSDK_6_1=$sdkRoot" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+          # Also append to INCLUDE and LIB for the compiler
+          $includeDir = $wh.Directory.FullName
+          $libDir = Get-ChildItem "sdk-v6.1" -Recurse -Directory -Filter "Lib" | Select-Object -First 1
+          if ($libDir) {
+            echo "INCLUDE=$includeDir;$($env:INCLUDE)" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+            echo "LIB=$($libDir.FullName);$($env:LIB)" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          }
+          Write-Host "Done."
+          
       - name: Set Vista SDK env vars
         shell: pwsh
         run: |
