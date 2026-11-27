@@ -429,26 +429,31 @@ jobs:
 
           $content = [System.IO.File]::ReadAllText($file)
 
-          # Add MSVC compiler path to the V8 subprocess environment.
-          # Insert after Import('env'), avoiding assumptions about env.Clone().
+          # Add MSVC compiler path to V8's SCons environment.
           $anchor = "Import('env')"
+          $msvcPatch = @(
+            "Import('env')",
+            "",
+            "import os",
+            "",
+            "env = env.Clone()",
+            "",
+            "_msvc_bin = os.environ.get('MSVC_BIN')",
+            "if not _msvc_bin:",
+            "  _msvc_root = os.environ.get('MSVC_ROOT')",
+            "  if _msvc_root:",
+            "    _msvc_bin = os.path.join(_msvc_root, 'bin')",
+            "",
+            "if _msvc_bin:",
+            "  env['ENV']['PATH'] = _msvc_bin + os.pathsep + os.environ.get('PATH', '')"
+          ) -join "`r`n"
 
-          $msvcPatch = @'
-          Import('env')
-
-          import os
-          _msvc_root = os.environ.get('MSVC_ROOT')
-          if _msvc_root:
-            _msvc_bin = os.path.join(_msvc_root, 'bin')
-            env['ENV']['PATH'] = _msvc_bin + os.pathsep + env['ENV'].get('PATH', os.environ.get('PATH', ''))
-          '@
-
-          if (-not $content.Contains("_msvc_root = os.environ.get('MSVC_ROOT')")) {
+          if (-not $content.Contains("_msvc_bin = os.environ.get('MSVC_BIN')")) {
             if (-not $content.Contains($anchor)) {
               throw "Could not find Import('env') in SConscript.v8"
             }
 
-            $content = $content.Replace($anchor, $msvcPatch.Trim())
+            $content = $content.Replace($anchor, $msvcPatch)
             Write-Host "Applied V8 MSVC PATH patch."
           } else {
             Write-Host "V8 MSVC PATH patch already exists."
