@@ -454,6 +454,37 @@ jobs:
           name: patch.patch
           path: patch.patch
 
+
+      - name: Diagnose V8 output paths
+        shell: pwsh
+        run: |
+          $v8 = "$env:GITHUB_WORKSPACE\chromium\v8"
+
+          Write-Host "=== V8 build directory configuration ==="
+          Select-String -Path "$v8\SConstruct" `
+            -Pattern "build_dir|SConscript\(|mksnapshot_targets|Alias\('mksnapshot" `
+            -Context 4,8
+
+          Write-Host "=== V8 snapshot target configuration ==="
+          Select-String -Path "$v8\src\SConscript" `
+            -Pattern "mksnapshot|Program\(|snapshot_cc" `
+            -Context 3,5
+
+          Write-Host "=== Existing V8 output directories ==="
+          Get-ChildItem $v8 -Directory |
+            Select-Object -ExpandProperty Name
+
+          foreach ($dir in @("bin", "obj")) {
+            if (Test-Path "$v8\$dir") {
+              Get-ChildItem "$v8\$dir" -Recurse -File |
+                Where-Object {
+                  $_.Name -match "mksnapshot|v8\.lib|v8\.exe"
+                } |
+                Select-Object -ExpandProperty FullName
+            }
+          }
+
+
       - name: Verify Python 2.4
         shell: pwsh
         run: |
