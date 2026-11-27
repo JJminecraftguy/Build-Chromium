@@ -378,9 +378,9 @@ jobs:
         run: |
           Set-Location "chromium\build"
           @"
+          build_component = ARGUMENTS.get('build_component', 'chrome')
           SConscript('SConscript.main')
           "@ | Out-File -FilePath "SConstruct" -Encoding ascii
-          Write-Host "Created build/SConstruct"
           
       - name: Build Chromium
         shell: pwsh
