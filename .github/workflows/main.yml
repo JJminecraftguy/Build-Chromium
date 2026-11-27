@@ -377,10 +377,13 @@ jobs:
           Write-Host "midl.exe: $((Get-Item "$env:MSVC_ROOT\bin\midl.exe").Length) bytes"
 
 
+
       - name: Apply source patches
         shell: pwsh
         run: |
           Set-Location "$env:GITHUB_WORKSPACE\chromium"
+
+          # Patch Chromium's main SCons environment for MSVC 2005.
           $f = "build\SConscript.main"
           $content = Get-Content $f -Raw
 
@@ -400,51 +403,69 @@ jobs:
           $insert = $insertLines -join "`n"
 
           $anchor = "  # Force scons to handle long include lines correctly."
-          if ($content.Contains($anchor)) {
-            $content = $content.Replace($anchor, $insert + $anchor)
-          } else {
-            Write-Error "Anchor not found"
-            exit 1
+          if (-not $content.Contains($anchor)) {
+            throw "MSVC patch anchor not found in SConscript.main"
           }
-          Set-Content $f $content -NoNewline
 
+          if (-not $content.Contains("_msvc_bin")) {
+            $content = $content.Replace($anchor, $insert + $anchor)
+            Set-Content $f $content -NoNewline
+            Write-Host "Applied MSVC environment patch."
+          } else {
+            Write-Host "MSVC environment patch already exists."
+          }
+
+          # Patch Chromium's V8 SCons invocation.
           $file = Join-Path $env:GITHUB_WORKSPACE "chromium\build\SConscript.v8"
 
-          Write-Host "Looking for: $file"
-
           if (-not (Test-Path $file)) {
-            Write-Host "Chromium directory contents:"
-            Get-ChildItem $env:GITHUB_WORKSPACE
             throw "SConscript.v8 was not found at $file"
           }
 
           $content = [System.IO.File]::ReadAllText($file)
 
-          $old = "SCONSFLAGS='-Q --warn=no-deprecated')"
-          $new = "SCONSFLAGS='-Q --warn=no-deprecated os=win32 mode=debug snapshot=on')"
+          $oldFlags = "SCONSFLAGS='-Q --warn=no-deprecated')"
+          $newFlags = "SCONSFLAGS='-Q --warn=no-deprecated os=win32 mode=debug snapshot=on')"
 
-          if ($content.Contains($new)) {
-            Write-Host "V8 OS, debug mode, and snapshot arguments already patched."
+          if ($content.Contains($newFlags)) {
+            Write-Host "V8 SCons flags already patched."
           }
-          elseif ($content.Contains($old)) {
-            $content = $content.Replace($old, $new)
-
-            [System.IO.File]::WriteAllText(
-              $file,
-              $content,
-              [System.Text.UTF8Encoding]::new($false)
-            )
-
-            Write-Host "Successfully patched V8 SCons."
+          elseif ($content.Contains($oldFlags)) {
+            $content = $content.Replace($oldFlags, $newFlags)
+            Write-Host "Enabled V8 debug mode and snapshots."
           }
           else {
             throw "Could not find expected SCONSFLAGS in SConscript.v8"
           }
 
-          Select-String -Path $file -Pattern "SCONSFLAGS"
+          # Fix the accidental one-element tuple caused by the trailing comma.
+          $oldLib = "v8_lib = File('#/../v8/bin/debug/v8.lib'),"
+          $newLib = "v8_lib = File('#/../v8/bin/debug/v8.lib')"
 
+          if ($content.Contains($oldLib)) {
+            $content = $content.Replace($oldLib, $newLib)
+            Write-Host "Fixed v8_lib File() declaration."
+          }
+          elseif ($content.Contains($newLib)) {
+            Write-Host "v8_lib declaration already fixed."
+          }
+          else {
+            throw "Could not find expected v8_lib declaration."
+          }
+
+          [System.IO.File]::WriteAllText(
+            $file,
+            $content,
+            [System.Text.UTF8Encoding]::new($false)
+          )
+
+          Write-Host "=== Applied V8 configuration ==="
+          Select-String -Path $file -Pattern "v8_lib|SCONSFLAGS"
+
+          # Save the resulting source diff.
           & "C:\Program Files\Git\bin\git.exe" diff > "$env:GITHUB_WORKSPACE\patch.patch"
-          Write-Host "Generated patch:"
+
+          Write-Host "=== Generated patch ==="
           Get-Content "$env:GITHUB_WORKSPACE\patch.patch"
 
 
@@ -453,37 +474,6 @@ jobs:
         with:
           name: patch.patch
           path: patch.patch
-
-
-      - name: Diagnose V8 output paths
-        shell: pwsh
-        run: |
-          $v8 = "$env:GITHUB_WORKSPACE\chromium\v8"
-
-          Write-Host "=== V8 build directory configuration ==="
-          Select-String -Path "$v8\SConstruct" `
-            -Pattern "build_dir|SConscript\(|mksnapshot_targets|Alias\('mksnapshot" `
-            -Context 4,8
-
-          Write-Host "=== V8 snapshot target configuration ==="
-          Select-String -Path "$v8\src\SConscript" `
-            -Pattern "mksnapshot|Program\(|snapshot_cc" `
-            -Context 3,5
-
-          Write-Host "=== Existing V8 output directories ==="
-          Get-ChildItem $v8 -Directory |
-            Select-Object -ExpandProperty Name
-
-          foreach ($dir in @("bin", "obj")) {
-            if (Test-Path "$v8\$dir") {
-              Get-ChildItem "$v8\$dir" -Recurse -File |
-                Where-Object {
-                  $_.Name -match "mksnapshot|v8\.lib|v8\.exe"
-                } |
-                Select-Object -ExpandProperty FullName
-            }
-          }
-
 
       - name: Verify Python 2.4
         shell: pwsh
@@ -529,28 +519,34 @@ jobs:
           [System.IO.File]::WriteAllLines("$PWD\SConstruct", $lines)
           Get-Content "SConstruct"
           
-      - name: Diagnose V8 snapshot configuration
+
+      - name: Inspect V8 build configuration
         shell: pwsh
         run: |
-          $v8 = "$env:GITHUB_WORKSPACE\chromium\v8"
-          $chrome = "$env:GITHUB_WORKSPACE\chromium"
+          Set-Location "$env:GITHUB_WORKSPACE\chromium\v8"
 
-          Write-Host "=== V8 SConstruct ==="
-          Select-String "$v8\SConstruct" `
-            -Pattern "mksnapshot|snapshot_targets|Alias|snapshot"
+          Write-Host "=== SConstruct lines 250-290 ==="
+          $s = Get-Content SConstruct
+          $s[249..289]
 
-          Write-Host "=== V8 src/SConscript ==="
-          Select-String "$v8\src\SConscript" `
-            -Pattern "mksnapshot|snapshot|Program"
+          Write-Host "=== SConstruct lines 320-360 ==="
+          $s[319..359]
 
-          Write-Host "=== Chromium SConscript.v8 ==="
-          Select-String "$chrome\build\SConscript.v8" `
-            -Pattern "mksnapshot|snapshot|SCONSFLAGS|TARGETS"
+          Write-Host "=== SConstruct lines 400-490 ==="
+          $s[399..489]
 
-          Write-Host "=== V8 snapshot-related files ==="
-          Get-ChildItem "$v8\src" -Recurse -File |
+          Write-Host "=== src/SConscript lines 90-145 ==="
+          $s = Get-Content src\SConscript
+          $s[89..144]
+
+          Write-Host "=== Existing V8 build directories ==="
+          Get-ChildItem -Directory |
+            Select-Object -ExpandProperty Name
+
+          Write-Host "=== Existing V8 executables and libraries ==="
+          Get-ChildItem -Recurse -File |
             Where-Object {
-              $_.Name -match "snapshot|mksnapshot"
+              $_.Name -match '^(mksnapshot|v8|snapshot-empty).*\.(exe|lib|obj)$'
             } |
             Select-Object -ExpandProperty FullName
 
