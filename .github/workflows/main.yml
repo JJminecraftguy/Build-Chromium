@@ -46,29 +46,56 @@ jobs:
             exit 1
           }
 
-          # Mount the ISO (it's a standard file system image, not a cabinet)
           Mount-DiskImage -ImagePath "$env:RUNNER_TEMP\vista_sdk.iso"
           $drive = (Get-DiskImage -ImagePath "$env:RUNNER_TEMP\vista_sdk.iso" | Get-Volume).DriveLetter
           Write-Host "Mounted at ${drive}:"
-          Get-ChildItem "${drive}:\\" | ForEach-Object { Write-Host "  $($_.Name)" }
 
-          # Copy directly from the mounted file system
-          New-Item -ItemType Directory -Force -Path sdk-v6.1
-          Copy-Item -Recurse "${drive}:\Include" "sdk-v6.1\Include"
-          Copy-Item -Recurse "${drive}:\Lib" "sdk-v6.1\Lib"
-          Copy-Item -Recurse "${drive}:\Bin" "sdk-v6.1\Bin"
+          # List all cabinets in Setup/
+          Write-Host "`nSetup/ contents:"
+          Get-ChildItem "${drive}:\Setup" -Filter "*.cab" | ForEach-Object {
+            Write-Host "  $($_.Name) ($([math]::Round($_.Length/1MB,1)) MB)"
+          }
+
+          # Find the cabinet that contains Include/ and Lib/
+          # The main SDK cabinet is typically the largest one, or named "WinSDK-*.cab"
+          $cabs = Get-ChildItem "${drive}:\Setup" -Filter "*.cab" | Sort-Object Length -Descending
+          $found = $false
+
+          foreach ($cab in $cabs) {
+            Write-Host "`nChecking $($cab.Name)..."
+            # List top-level paths in the cabinet
+            $list = 7z l $cab.FullName 2>&1 | Select-String "Include|Lib|Bin" | Select-Object -First 5
+            if ($list) {
+              Write-Host "  Found SDK paths in this cabinet:"
+              $list | ForEach-Object { Write-Host "    $_" }
+              $found = $true
+
+              # Extract Include, Lib, Bin from this cabinet
+              New-Item -ItemType Directory -Force -Path sdk-v6.1
+              7z x $cab.FullName "Include" -o"sdk-v6.1" -y
+              7z x $cab.FullName "Lib" -o"sdk-v6.1" -y
+              7z x $cab.FullName "Bin" -o"sdk-v6.1" -y
+              break
+            }
+          }
+
+          if (-not $found) {
+            Write-Error "No cabinet in ${drive}:\Setup contains Include/Lib/Bin"
+            exit 1
+          }
 
           Dismount-DiskImage -ImagePath "$env:RUNNER_TEMP\vista_sdk.iso"
           Remove-Item "$env:RUNNER_TEMP\vista_sdk.iso" -Force
 
           # Verify
           if (-not (Test-Path "sdk-v6.1\Include\windows.h")) {
-            Write-Host "Contents of sdk-v6.1\Include:"
-            Get-ChildItem "sdk-v6.1\Include" -Depth 1 | Select-Object -First 20 | ForEach-Object { Write-Host "  $($_.Name)" }
+            Write-Host "sdk-v6.1 contents:"
+            Get-ChildItem "sdk-v6.1" -Depth 1 | Select-Object -First 20 | ForEach-Object { Write-Host "  $($_.Name)" }
             Write-Error "windows.h not found"
             exit 1
           }
-          Write-Host "Vista SDK ready: $((Get-ChildItem 'sdk-v6.1' -Recurse -File | Measure-Object Length -Sum).Sum / 1MB) MB"
+          $totalMB = (Get-ChildItem 'sdk-v6.1' -Recurse -File | Measure-Object Length -Sum).Sum / 1MB
+          Write-Host "Vista SDK ready: $totalMB MB"
 
       - name: Save Vista SDK cache
         if: steps.sdk-cache.outputs.cache-hit != 'true'
