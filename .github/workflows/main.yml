@@ -495,6 +495,23 @@ jobs:
           Write-Host "$unicodeDir\ucnv.h"
           Write-Host "Header count: $((Get-ChildItem $unicodeDir -Filter '*.h' -File).Count)"
 
+      - name: Diagnose Vista SDK headers
+        shell: pwsh
+        run: |
+          $sdk = "chromium\third_party\platformsdk_vista_6_0"
+
+          Write-Host "=== Windows SDK winuser.h files ==="
+
+          $headers = Get-ChildItem $sdk -Recurse -Filter winuser.h -File
+
+          foreach ($header in $headers) {
+            Write-Host ""
+            Write-Host "HEADER: $($header.FullName)"
+
+            Select-String -Path $header.FullName `
+              -Pattern "PICONINFOEX|IDI_SHIELD"
+          }
+
       # ── 7. Setup build environment ─────────────────────────────
       - name: Setup VS2005 directory structure
         shell: pwsh
@@ -874,6 +891,17 @@ jobs:
 
           Write-Host "ATL header download successful."
           Get-Item $output | Format-List FullName, Length
+
+      - name: Inspect V8 SCons environment handling
+        shell: pwsh
+        run: |
+          Set-Location "chromium\v8"
+
+          Write-Host "=== V8 SConstruct environment setup ==="
+
+          Select-String -Path "SConstruct" `
+            -Pattern "ARGUMENTS|Environment\(|ENV|env" `
+            -Context 3,5
 
       - name: Build Chromium
         shell: pwsh
