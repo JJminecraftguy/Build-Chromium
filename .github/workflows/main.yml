@@ -25,21 +25,34 @@ jobs:
         shell: pwsh
         run: cl.exe /?
 
-      - name: Set PLATFORMSDK_6_1
+      - name: Setup in-tree SDK and Cygwin paths
         shell: pwsh
         run: |
-          # Create the expected layout (SConscript looks for $PLATFORMSDK_6_1\Include and \Lib)
-          New-Item -ItemType Directory -Force -Path sdk-v6.1 | Out-Null
-          New-Item -ItemType Junction -Path "sdk-v6.1\Include" -Target "$env:MSVC_ROOT\platform_sdk_include" -Force
-          New-Item -ItemType Junction -Path "sdk-v6.1\Lib" -Target "$env:MSVC_ROOT\platform_sdk_lib" -Force
+          Set-Location "chromium"
+
+          # Create the expected SDK layout using junctions to setup-msvc toolchain
+          $sdkBase = "third_party\platformsdk_vista_6_0\files"
+          New-Item -ItemType Directory -Force -Path "$sdkBase\VC" | Out-Null
+
+          New-Item -ItemType Junction -Path "$sdkBase\Include" -Target "$env:MSVC_ROOT\platform_sdk_include" -Force
+          New-Item -ItemType Junction -Path "$sdkBase\VC\INCLUDE" -Target "$env:MSVC_ROOT\platform_sdk_include" -Force
+          New-Item -ItemType Junction -Path "$sdkBase\Lib" -Target "$env:MSVC_ROOT\platform_sdk_lib" -Force
+          New-Item -ItemType Junction -Path "$sdkBase\VC\LIB" -Target "$env:MSVC_ROOT\platform_sdk_lib" -Force
 
           # Verify
-          if (-not (Test-Path "sdk-v6.1\Include\windows.h")) {
-            Write-Error "windows.h not found in platform_sdk_include"
+          if (-not (Test-Path "$sdkBase\Include\windows.h")) {
+            Write-Error "windows.h not found at $sdkBase\Include"
             exit 1
           }
-          Write-Host "windows.h OK. Lib count: $((Get-ChildItem 'sdk-v6.1\Lib' -Filter '*.lib' | Measure-Object).Count)"
-          echo "PLATFORMSDK_6_1=$PWD\sdk-v6.1" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          Write-Host "SDK junctions OK"
+
+          # Cygwin: create dir, get perl + bison from Git for Windows (already on runner)
+          New-Item -ItemType Directory -Force -Path "third_party\cygwin\bin" | Out-Null
+          # Git for Windows bundles perl.exe and bison.exe
+          $gitPerl = "C:\Program Files\Git\usr\bin\perl.exe"
+          $gitBison = "C:\Program Files\Git\usr\bin\bison.exe"
+          if (Test-Path $gitPerl) {
+            Copy-Item $gitPerl "third_party\cygwin\bin\p
           
       # ── 4. DirectX 9.0c SDK headers (Dec 2006) ─────────────────
       - name: Cache DX9 headers
