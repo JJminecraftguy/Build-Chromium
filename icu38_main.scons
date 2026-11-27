@@ -2,7 +2,7 @@ import os
 import platform
 
 CombinedLib = True
-GenerateDataLib = False
+GenerateDataLib = True
 
 Import('env')
 
