@@ -469,6 +469,32 @@ jobs:
           Get-Content "$env:GITHUB_WORKSPACE\patch.patch"
 
 
+          Set-Location "$env:GITHUB_WORKSPACE\chromium\v8"
+
+          Write-Host "=== V8 build directory configuration ==="
+          Select-String -Path SConstruct `
+            -Pattern "build_dir|BUILD_DIR|obj/|bin/|variant_dir|VariantDir|Program"
+
+          Write-Host "=== V8 SConstruct build setup ==="
+          $lines = Get-Content SConstruct
+          $lines[350..490]
+
+          Write-Host "=== V8 generated directories ==="
+          Get-ChildItem -Directory -Recurse |
+            Where-Object {
+              $_.FullName -match '\\(bin|obj)\\'
+            } |
+            Select-Object -ExpandProperty FullName
+
+          Write-Host "=== V8 generated files ==="
+          Get-ChildItem -Recurse -File |
+            Where-Object {
+              $_.Name -match 'mksnapshot|snapshot-empty|v8\.lib'
+            } |
+            Select-Object -ExpandProperty FullName
+
+
+
       - name: Upload patch artifact
         uses: actions/upload-artifact@v4
         with:
