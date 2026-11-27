@@ -162,20 +162,19 @@ jobs:
           curl.exe -L -o "$env:RUNNER_TEMP\icu4c-3_8_1-src.tgz" "https://downloads.sourceforge.net/project/icu/ICU4C/3.8.1/icu4c-3_8_1-src.tgz"
           7z x "$env:RUNNER_TEMP\icu4c-3_8_1-src.tgz" -o"$env:RUNNER_TEMP\icu" -y
           7z x "$env:RUNNER_TEMP\icu\icu4c-3_8_1-src.tar" -o"$env:RUNNER_TEMP\icu" -y
-          Write-Host "=== Top-level ==="
-          Get-ChildItem "$env:RUNNER_TEMP\icu" | ForEach-Object { Write-Host $_.Name }
-          Write-Host "=== All directories (depth 2) ==="
-          Get-ChildItem "$env:RUNNER_TEMP\icu" -Recurse -Directory -Depth 2 | ForEach-Object { Write-Host $_.FullName.Replace("$env:RUNNER_TEMP\icu\", "") }
 
-          # Create the structure the SCons build expects
+          $src = "$env:RUNNER_TEMP\icu\icu\source"
+          Write-Host ">>> Using: $src"
+
+          # public/ = headers for other Chromium code to include
           New-Item -ItemType Directory -Force -Path src\third_party\icu38\public
-          # public/ = headers only (what other Chromium code includes)
-          Copy-Item -Recurse "$($sourceDir.FullName)\common" src\third_party\icu38\public\common
-          Copy-Item -Recurse "$($sourceDir.FullName)\i18n" src\third_party\icu38\public\i18n
-          # source/ = full source tree
-          Move-Item -Path $sourceDir.FullName -Destination src\third_party\icu38\source
+          Copy-Item -Recurse "$src\common" src\third_party\icu38\public\common
+          Copy-Item -Recurse "$src\i18n" src\third_party\icu38\public\i18n
 
-          # Get the scons build script (o3d derivative of the original icu38_main.scons)
+          # source/ = full source tree
+          Move-Item -Path $src -Destination src\third_party\icu38\source
+
+          # SCons build script
           curl.exe -L -o "$env:RUNNER_TEMP\icu38_main.b64" "https://chromium.googlesource.com/chromium/src/+/refs/tags/4.0.212.1/o3d/base/icu38_o3d.scons?format=TEXT"
           $b64 = Get-Content "$env:RUNNER_TEMP\icu38_main.b64" -Raw
           $bytes = [Convert]::FromBase64String($b64)
