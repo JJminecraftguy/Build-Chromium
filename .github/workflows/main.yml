@@ -306,7 +306,7 @@ jobs:
           # bison from winflexbison (Windows port)
           Start-Sleep -Seconds 6
           curl.exe -L -o "$env:RUNNER_TEMP\winflexbison.zip" `
-            "https://sourceforge.net/projects/winflexbison/files/win_flex_bison/win_flex_bison-2.5.24.zip/download"
+            "https://downloads.sourceforge.net/project/winflexbison/old_versions/win_flex_bison-2.5.24.zip"
           7z x "$env:RUNNER_TEMP\winflexbison.zip" "bison.exe" -o"third_party\cygwin\bin" -y
           Remove-Item "$env:RUNNER_TEMP\winflexbison.zip" -Force
 
