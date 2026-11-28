@@ -1,0 +1,1076 @@
+name: build-chrome-0.2
+
+# Builds the very first public Chromium (0.2.149.27) with the original toolchain
+# (VS2005 SP1 + Platform SDK) and WITHOUT the never-published Vista SDK.
+#
+# Caches (all restored/saved explicitly, so a failed build still keeps them):
+#   toolchain  DX9 headers, ATL/MFC, bison         - bump TOOLCHAIN_CACHE_KEY to refresh
+#   deps       breakpad, gtest, v8, webkit tests,
+#              googleurl, ICU                      - bump DEPS_CACHE_KEY to refresh
+#   chromium   pristine shallow checkout           - keyed by commit
+#   build      incremental SCons output            - rolling, newest run wins
+
+on:
+  workflow_dispatch:
+    inputs:
+      clean_build:
+        description: Ignore the incremental build cache and rebuild everything
+        type: boolean
+        default: false
+
+concurrency:
+  group: build-chrome-0.2
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  actions: write # lets us delete the superseded incremental-build cache
+
+env:
+  CHROMIUM_SHA: 4db48af7ca622fe2b6d521abd7116f76e3d9ecb1
+  MSVC_VERSION: "14.00.50727.762"
+  TOOLCHAIN_CACHE_KEY: toolchain-v1
+  DEPS_CACHE_KEY: deps-v1
+
+jobs:
+  build:
+    runs-on: windows-2022
+    timeout-minutes: 360
+    defaults:
+      run:
+        shell: pwsh
+
+    steps:
+      # ── Repo files (midl.exe, ICU SCons file, unicode headers) ─────────────
+      - name: Checkout this repository
+        uses: actions/checkout@v4
+        with:
+          path: repo
+
+      # ── Toolchain: MSVC 2005 SP1 (setup-msvc needs Go) ─────────────────────
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: stable
+          cache: false
+
+      - name: Setup MSVC 2005 SP1
+        uses: jaenster/setup-msvc@v1
+        with:
+          version: ${{ env.MSVC_VERSION }}
+
+      - name: Verify toolchain
+        run: |
+          foreach ($tool in 'cl.exe', 'link.exe', 'lib.exe') {
+            $found = @(where.exe $tool 2>$null)
+            if (-not $found) { throw "$tool is not on PATH" }
+            Write-Host "$tool -> $($found[0])"
+          }
+          if ((where.exe link.exe)[0] -notlike "$env:MSVC_ROOT*") {
+            throw "link.exe resolves to $((where.exe link.exe)[0]) (shadowing MSVC's linker)"
+          }
+          # cl prints its banner on stderr
+          Write-Host (cl.exe 2>&1 | Select-Object -First 1)
+
+      # ── Toolchain extras: DirectX 9 headers, ATL/MFC, bison ────────────────
+      - name: Restore toolchain extras
+        id: toolchain
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            dx9-sdk
+            msvc8-atlmfc
+            tools-cache
+          key: ${{ env.TOOLCHAIN_CACHE_KEY }}
+
+      - name: Fetch toolchain extras
+        if: steps.toolchain.outputs.cache-hit != 'true'
+        run: |
+          $ErrorActionPreference = 'Stop'
+          function Exec { & $args[0] $args[1..($args.Count - 1)]; if ($LASTEXITCODE -ne 0) { throw "Failed ($LASTEXITCODE): $args" } }
+          $tmp = $env:RUNNER_TEMP
+
+          # DirectX 9.0c SDK (Dec 2006): headers + libs only
+          if (-not (Test-Path dx9-sdk)) {
+            Exec curl.exe -fL --retry 3 -o "$tmp\dxsdk.exe" https://archive.org/download/dxsdk_dec2006/dxsdk_dec2006.exe
+            Exec 7z x "$tmp\dxsdk.exe" -o"$tmp\dx_cab" -y
+            $cab = Get-ChildItem "$tmp\dx_cab" -Filter *.cab -Recurse | Select-Object -First 1
+            if (-not $cab) { $cab = Get-ChildItem "$tmp\dx_cab" -Recurse | Where-Object Length -gt 100MB | Select-Object -First 1 }
+            Exec 7z x $cab.FullName Include -o"$tmp\dx" -y
+            Exec 7z x $cab.FullName Lib -o"$tmp\dx" -y
+            Move-Item "$tmp\dx" dx9-sdk
+            Remove-Item "$tmp\dxsdk.exe", "$tmp\dx_cab" -Recurse -Force
+            if (-not (Get-ChildItem dx9-sdk -Recurse -Filter d3d9.h)) { throw 'd3d9.h not found in DX9 SDK' }
+          }
+
+          # ATL/MFC (not part of the SP1 pack): sparse clone of just atlmfc/
+          if (-not (Test-Path msvc8-atlmfc\atlmfc\include\atlbase.h)) {
+            Exec git clone --depth 1 --filter=blob:none --sparse https://github.com/widberg/msvc8.0.git "$tmp\msvc8"
+            Exec git -C "$tmp\msvc8" sparse-checkout set atlmfc
+            New-Item -ItemType Directory -Force msvc8-atlmfc | Out-Null
+            Copy-Item "$tmp\msvc8\atlmfc" msvc8-atlmfc\atlmfc -Recurse -Force
+            if (-not (Test-Path msvc8-atlmfc\atlmfc\include\atlbase.h)) { throw 'atlbase.h missing after ATL/MFC download' }
+          }
+
+          # bison (win_flex_bison 2.5.24): keep the whole package, bison needs its data dir
+          if (-not (Test-Path tools-cache\winflexbison)) {
+            Exec curl.exe -fL --retry 3 -o "$tmp\winflexbison.zip" https://downloads.sourceforge.net/project/winflexbison/old_versions/win_flex_bison-2.5.24.zip
+            Exec 7z x "$tmp\winflexbison.zip" -o"tools-cache\winflexbison" -y
+            $bison = Get-ChildItem tools-cache\winflexbison -Recurse -Include bison.exe, win_bison.exe | Select-Object -First 1
+            if (-not $bison) { throw 'no bison executable found in win_flex_bison package' }
+            Write-Host "bison: $($bison.FullName)"
+          }
+
+      - name: Save toolchain extras
+        if: steps.toolchain.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            dx9-sdk
+            msvc8-atlmfc
+            tools-cache
+          key: ${{ env.TOOLCHAIN_CACHE_KEY }}
+
+      # ── Third-party sources ────────────────────────────────────────────────
+      - name: Restore dependency sources
+        id: deps
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            src/breakpad/src
+            src/testing/gtest
+            src/v8
+            src/webkit/data/layout_tests
+            src/googleurl
+            src/third_party/icu38
+          key: ${{ env.DEPS_CACHE_KEY }}
+
+      - name: Setup SVN (for googleurl)
+        if: steps.deps.outputs.cache-hit != 'true'
+        uses: AmpScm/setup-subversion@v1
+
+      - name: Fetch dependency sources
+        if: steps.deps.outputs.cache-hit != 'true'
+        run: |
+          $ErrorActionPreference = 'Stop'
+          function Exec { & $args[0] $args[1..($args.Count - 1)]; if ($LASTEXITCODE -ne 0) { throw "Failed ($LASTEXITCODE): $args" } }
+          $tmp = $env:RUNNER_TEMP
+
+          # Blobless clone, check out one revision, drop .git, move into place.
+          function Get-GitSource($Name, $Url, $Branch, $Rev, $Dest, $SubPath) {
+            if (Test-Path $Dest) { Write-Host "${Name}: already present"; return }
+            Write-Host "::group::$Name @ $Rev"
+            $work = Join-Path $tmp $Name
+            Exec git clone --filter=blob:none --no-tags --single-branch -b $Branch --no-checkout $Url $work
+            if ($SubPath) { Exec git -C $work checkout -q $Rev -- $SubPath } else { Exec git -C $work checkout -q $Rev }
+            Remove-Item "$work\.git" -Recurse -Force
+            New-Item -ItemType Directory -Force -Path (Split-Path $Dest) | Out-Null
+            if ($SubPath) { Move-Item "$work\$SubPath" $Dest } else { Move-Item $work $Dest }
+            Write-Host '::endgroup::'
+          }
+
+          Get-GitSource breakpad https://github.com/google/breakpad.git main 2d7664e8d477816e0641e822752f63982c1be74f src\breakpad\src
+          Get-GitSource googletest https://github.com/stp/googletest.git master 26ddf828fa2870982315f4dc8dd4f6e4777f4d29 src\testing\gtest
+          Get-GitSource v8 https://chromium.googlesource.com/v8/v8.git main 4de96712f4295f4e5deaadc5d8a7429889eee00b src\v8
+
+          # WebKit LayoutTests: fetch the exact revision without partial-clone
+          # filtering (on-demand blob downloads from googlesource were failing
+          # with "unable to read sha1 file").
+          $webkitRev  = 'd48ae3e98a7de1e687103a8a172d911bf764a90a'
+          $webkitUrl  = 'https://chromium.googlesource.com/external/Webkit'
+          $webkitWork = Join-Path $tmp 'webkit'
+          $webkitDest = 'src\webkit\data\layout_tests'
+
+          if (-not (Test-Path $webkitDest)) {
+            Write-Host "::group::WebKit LayoutTests @ $webkitRev"
+
+            if (Test-Path $webkitWork) {
+              Remove-Item $webkitWork -Recurse -Force
+            }
+
+            Exec git init -q $webkitWork
+            Exec git -C $webkitWork remote add origin $webkitUrl
+            Exec git -C $webkitWork fetch --no-tags --depth=1 origin $webkitRev
+            Exec git -C $webkitWork checkout -q FETCH_HEAD -- LayoutTests
+
+            if (-not (Test-Path "$webkitWork\LayoutTests")) {
+              throw 'WebKit LayoutTests directory was not checked out'
+            }
+
+            New-Item -ItemType Directory -Force -Path (Split-Path $webkitDest) | Out-Null
+            Move-Item "$webkitWork\LayoutTests" $webkitDest
+            Remove-Item $webkitWork -Recurse -Force
+
+            Write-Host '::endgroup::'
+          }
+
+          # googleurl r92 only exists as an svn dump
+          if (-not (Test-Path src\googleurl)) {
+            Write-Host '::group::googleurl r92'
+            Exec curl.exe -fL --retry 3 -o "$tmp\google-url.svndump.gz" https://storage.googleapis.com/google-code-archive-source/v2/code.google.com/google-url/repo.svndump.gz
+            Exec 7z x "$tmp\google-url.svndump.gz" -o"$tmp" -y
+            Exec svnadmin create "$tmp\google-url-svn"
+            cmd /c "svnadmin load ""$tmp\google-url-svn"" < ""$tmp\google-url.svndump"""
+            if ($LASTEXITCODE -ne 0) { throw 'svnadmin load failed' }
+            New-Item -ItemType Directory -Force src | Out-Null
+            Exec svn checkout "file:///$($tmp.Replace('\','/'))/google-url-svn/trunk@92" src\googleurl
+            Write-Host '::endgroup::'
+          }
+
+          # ICU 3.8.1 (full source tree: the .dat file and sources are needed)
+          if (-not (Test-Path src\third_party\icu38)) {
+            Write-Host '::group::ICU 3.8.1'
+            Exec curl.exe -fL --retry 3 -o "$tmp\icu.tgz" https://downloads.sourceforge.net/project/icu/ICU4C/3.8.1/icu4c-3_8_1-src.tgz
+            Exec 7z x "$tmp\icu.tgz" -o"$tmp\icu" -y
+            Exec 7z x "$tmp\icu\icu4c-3_8_1-src.tar" -o"$tmp\icu" -y
+            $src = "$tmp\icu\icu\source"
+            New-Item -ItemType Directory -Force src\third_party\icu38\public | Out-Null
+            Copy-Item -Recurse "$src\common" src\third_party\icu38\public\common
+            Copy-Item -Recurse "$src\i18n" src\third_party\icu38\public\i18n
+            Move-Item $src src\third_party\icu38\source
+            if (-not (Test-Path src\third_party\icu38\source\data\in\icudt38l.dat)) { throw 'icudt38l.dat missing from ICU source tree' }
+            Remove-Item "$tmp\icu" -Recurse -Force
+            Write-Host '::endgroup::'
+          }
+
+      - name: Save dependency sources
+        if: steps.deps.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            src/breakpad/src
+            src/testing/gtest
+            src/v8
+            src/webkit/data/layout_tests
+            src/googleurl
+            src/third_party/icu38
+          key: ${{ env.DEPS_CACHE_KEY }}
+
+      # ── Chromium 0.2.149.27, pristine and shallow ──────────────────────────
+      - name: Restore Chromium checkout
+        id: chromium
+        uses: actions/cache/restore@v4
+        with:
+          path: chromium
+          key: chromium-${{ env.CHROMIUM_SHA }}
+
+      - name: Fetch Chromium
+        if: steps.chromium.outputs.cache-hit != 'true'
+        run: |
+          $ErrorActionPreference = 'Stop'
+          function Exec { & $args[0] $args[1..($args.Count - 1)]; if ($LASTEXITCODE -ne 0) { throw "Failed ($LASTEXITCODE): $args" } }
+          New-Item -ItemType Directory -Force chromium | Out-Null
+          Exec git -C chromium init -q
+          Exec git -C chromium remote add origin https://github.com/chromium/chromium.git
+          Exec git -C chromium fetch -q --depth 1 origin $env:CHROMIUM_SHA
+          Exec git -C chromium checkout -q FETCH_HEAD
+          Remove-Item chromium\.git -Recurse -Force   # not needed; keeps the cache small
+          Get-Content chromium\chrome\VERSION
+
+      - name: Save Chromium checkout
+        if: steps.chromium.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: chromium
+          key: chromium-${{ env.CHROMIUM_SHA }}
+
+      # ── Assemble the source tree ───────────────────────────────────────────
+      - name: Prepare source tree
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $ws = $env:GITHUB_WORKSPACE
+          $cr = "$ws\chromium"
+
+          function Link($Path, $Target) {
+            if (-not (Test-Path $Target)) { throw "link target missing: $Target" }
+            if (Test-Path -LiteralPath $Path) {
+              $item = Get-Item -LiteralPath $Path -Force
+              if ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) { $item.Delete() }
+              else { Remove-Item -LiteralPath $Path -Recurse -Force }
+            }
+            New-Item -ItemType Directory -Force -Path (Split-Path $Path) | Out-Null
+            New-Item -ItemType Junction -Path $Path -Target $Target | Out-Null
+          }
+
+          # VS2005 layout that Chromium's SConscript.main derives from PATH
+          $vc = 'C:\Program Files\Microsoft Visual Studio 8\VC'
+          foreach ($d in 'bin', 'include', 'lib') { Link "$vc\$d" "$env:MSVC_ROOT\$d" }
+          Link "$vc\atlmfc" "$ws\msvc8-atlmfc\atlmfc"
+
+          # External dependencies
+          Link "$cr\googleurl"          "$ws\src\googleurl"
+          Link "$cr\breakpad"           "$ws\src\breakpad"
+          Link "$cr\v8"                 "$ws\src\v8"
+          Link "$cr\testing\gtest"      "$ws\src\testing\gtest"
+          Link "$cr\third_party\icu38"  "$ws\src\third_party\icu38"
+
+          # ICU: SCons glue + trimmed public headers from this repo (existing files kept)
+          Copy-Item "$ws\repo\icu38_main.scons" "$cr\third_party\icu38\icu38_main.scons" -Force
+          $unicode = "$cr\third_party\icu38\public\common\unicode"
+          New-Item -ItemType Directory -Force $unicode | Out-Null
+          7z x "$ws\repo\unicode.zip" -o"$unicode" -aos -y | Out-Null
+          if ($LASTEXITCODE -ne 0) { throw 'failed to extract unicode.zip' }
+          if (-not (Test-Path "$unicode\ucnv.h")) { throw 'ucnv.h missing' }
+
+          # Build tools Chromium expects under third_party\cygwin\bin
+          $bin = "$cr\third_party\cygwin\bin"
+          New-Item -ItemType Directory -Force $bin | Out-Null
+          Copy-Item 'C:\Program Files\Git\usr\bin\perl.exe' "$bin\perl.exe" -Force
+          $bison = Get-ChildItem "$ws\tools-cache\winflexbison" -Recurse -Include bison.exe, win_bison.exe | Select-Object -First 1
+          Copy-Item $bison.FullName "$bin\bison.exe" -Force
+          $data = Get-ChildItem "$ws\tools-cache\winflexbison" -Recurse -Directory -Filter data | Select-Object -First 1
+          if ($data) { Copy-Item $data.FullName "$bin\data" -Recurse -Force }
+
+          # midl.exe stand-in used for the IDL targets
+          Copy-Item "$ws\repo\midl.exe" "$env:MSVC_ROOT\bin\midl.exe" -Force
+
+          # SCons entry point
+          [IO.File]::WriteAllLines("$cr\build\SConstruct", @(
+            "build_component = ARGUMENTS.get('build_component', 'chrome')",
+            "ARGUMENTS['os'] = 'win32'",
+            "SConscript('SConscript.main', exports=['build_component'])"))
+
+          # Chromium's bundled Python 2.4 and SCons, exposed to later steps
+          $py = Get-ChildItem "$cr\third_party\python_24" -Recurse -Filter python.exe | Select-Object -First 1
+          if (-not $py) { throw 'python.exe not found in third_party\python_24' }
+          & $py.FullName -V
+          "PYTHON=$($py.FullName)" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+          $scons = "$cr\third_party\scons\scons.py"
+          if (-not (Test-Path $scons)) { throw 'scons.py not found' }
+          "SCONS_PY=$scons" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+
+      - name: Configure build environment
+        run: |
+          $ws = $env:GITHUB_WORKSPACE
+          $atl = "$ws\msvc8-atlmfc\atlmfc"
+          $dxLib = if (Test-Path "$ws\dx9-sdk\Lib\x86") { "$ws\dx9-sdk\Lib\x86" } else { "$ws\dx9-sdk\Lib" }
+
+          # setup-msvc already put the compiler, CRT and Platform SDK in INCLUDE/LIB.
+          # legacy-compat comes LAST so a real SDK header always wins over a shim.
+          $include = "$atl\include;$ws\dx9-sdk\Include;$env:INCLUDE;$ws\legacy-compat\include"
+          $lib     = "$atl\lib;$dxLib;$env:LIB;$ws\legacy-compat\lib"
+
+          "INCLUDE=$include"                 | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+          "LIB=$lib"                         | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+          "MSVC_ATLMFC_ROOT=$atl"            | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+          'VSINSTALLDIR=C:\Program Files\Microsoft Visual Studio 8' | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+
+      # ── Source patches: build for legacy Windows without the Vista SDK ─────
+      #  * _WIN32_WINNT / WINVER 0x0600 -> 0x0501, Vista SDK search paths removed
+      #  * dwmapi.h  -> run-time loading shim (no dwmapi.lib / import)
+      #  * vsstyle.h / vssym32.h / winhttp.h -> mingw-w64 headers (ZPL 2.1), only if missing
+      #  * winhttp.lib / msi.lib -> import libs generated with lib.exe, only if missing
+      #  * Vista-only SDK constants/types -> legacy_sdk_compat.h, included only where used
+      #  * SCRIPT_CONTROL initializer for the older Uniscribe header
+      #  * SCons: nested V8 build can find cl.exe/INCLUDE/LIB; V8 output paths + flags
+      - name: Apply source patches
+        shell: python
+        run: |
+          """Patch Chromium 0.2.149.27 so it builds with the VS2005 SP1 toolchain and the
+          Server 2003-era Platform SDK only (no Vista SDK) and targets legacy Windows.
+
+          Runs inside the workflow with the workspace as CWD. Idempotent and strict: if an
+          anchor is missing the script fails loudly instead of silently skipping a patch.
+          All SCons snippets that are injected are Python 2.4 compatible (Chromium ships
+          Python 2.4 and SCons 0.98.3).
+          """
+          import difflib
+          import os
+          import re
+          import shlex
+          import subprocess
+          import sys
+          import time
+          import urllib.request
+
+          WS = os.environ.get('GITHUB_WORKSPACE') or os.getcwd()
+          ROOT = os.path.join(WS, 'chromium')
+          COMPAT = os.path.join(WS, 'legacy-compat', 'include')
+          COMPAT_LIB = os.path.join(WS, 'legacy-compat', 'lib')
+          OUT = os.path.join(WS, 'legacy-patches')
+
+          # Header level used for the whole build. 0x0501 (XP) is the lowest level WTL's
+          # theme code accepts; the real Win2000/9x compatibility work happens at the
+          # import-table level later. Everything Vista-only is shimmed below.
+          WIN_VER = '0x0501'
+
+          # mingw-w64 supplies vsstyle.h / vssym32.h (ZPL 2.1, notices kept in the files).
+          MINGW_W64_SHA = '73d4c0c5bccccbd92eb434dedf9551865dfec7b0'
+          MINGW_URL = ('https://raw.githubusercontent.com/mingw-w64/mingw-w64/%s/'
+                       'mingw-w64-headers/include/%%s' % MINGW_W64_SHA)
+          MINGW_DEF_URL = ('https://raw.githubusercontent.com/mingw-w64/mingw-w64/%s/'
+                           'mingw-w64-crt/lib32/%%s.def' % MINGW_W64_SHA)
+
+          # Headers / import libraries that the VS2005 SP1 Platform SDK pack does not ship
+          # but Chromium 0.2 needs. They are only fetched/generated when missing.
+          MISSING_HEADERS = ('vsstyle.h', 'vssym32.h', 'winhttp.h')
+          MISSING_IMPORT_LIBS = ('winhttp', 'msi')
+
+          COMPAT_INCLUDE = '#include <legacy_sdk_compat.h>'
+
+          DWMAPI_H = r'''// Legacy replacement for the Vista SDK's <dwmapi.h>.
+          //
+          // The real header declares functions imported from dwmapi.lib, which only
+          // exists on Windows Vista+. This shim resolves the few DWM entry points
+          // Chromium uses at runtime with LoadLibrary/GetProcAddress, so the binary
+          // has no static dependency on dwmapi.dll and simply reports "no composition"
+          // on Windows 2000/XP and 9x.
+          #ifndef LEGACY_DWMAPI_SHIM_H_
+          #define LEGACY_DWMAPI_SHIM_H_
+
+          #include <windows.h>
+          #include <uxtheme.h>  // MARGINS
+
+          #ifndef E_NOTIMPL
+          #define E_NOTIMPL ((HRESULT)0x80004001L)
+          #endif
+
+          #ifdef __cplusplus
+          extern "C" {
+          #endif
+
+          __inline FARPROC LegacyDwm_GetProc(const char* name) {
+            static HMODULE dwm = NULL;
+            static int tried = 0;
+            if (!tried) {
+              tried = 1;
+              dwm = LoadLibraryA("dwmapi.dll");
+            }
+            return dwm ? GetProcAddress(dwm, name) : NULL;
+          }
+
+          __inline HRESULT DwmIsCompositionEnabled(BOOL* pfEnabled) {
+            typedef HRESULT (WINAPI *Fn)(BOOL*);
+            Fn fn = (Fn)LegacyDwm_GetProc("DwmIsCompositionEnabled");
+            if (pfEnabled)
+              *pfEnabled = FALSE;
+            return fn ? fn(pfEnabled) : E_NOTIMPL;
+          }
+
+          __inline BOOL DwmDefWindowProc(HWND hwnd, UINT msg, WPARAM wParam,
+                                         LPARAM lParam, LRESULT* plResult) {
+            typedef BOOL (WINAPI *Fn)(HWND, UINT, WPARAM, LPARAM, LRESULT*);
+            Fn fn = (Fn)LegacyDwm_GetProc("DwmDefWindowProc");
+            return fn ? fn(hwnd, msg, wParam, lParam, plResult) : FALSE;
+          }
+
+          __inline HRESULT DwmExtendFrameIntoClientArea(HWND hwnd,
+                                                        const MARGINS* pMarInset) {
+            typedef HRESULT (WINAPI *Fn)(HWND, const MARGINS*);
+            Fn fn = (Fn)LegacyDwm_GetProc("DwmExtendFrameIntoClientArea");
+            return fn ? fn(hwnd, pMarInset) : E_NOTIMPL;
+          }
+
+          #ifdef __cplusplus
+          }
+          #endif
+
+          #endif  // LEGACY_DWMAPI_SHIM_H_
+          '''
+
+          LEGACY_SDK_COMPAT_H = r'''// Fallback definitions for Windows Vista+ SDK constants/types that Chromium
+          // 0.2 references at compile time. Everything is guarded, so a newer SDK's real
+          // definitions win if they exist. At runtime these code paths are already
+          // gated behind win_util::GetWinVersion() checks.
+          #ifndef LEGACY_SDK_COMPAT_H_
+          #define LEGACY_SDK_COMPAT_H_
+
+          #include <windows.h>
+
+          #ifndef PROCESS_QUERY_LIMITED_INFORMATION
+          #define PROCESS_QUERY_LIMITED_INFORMATION (0x1000)
+          #endif
+          #ifndef THREAD_SET_LIMITED_INFORMATION
+          #define THREAD_SET_LIMITED_INFORMATION (0x0400)
+          #endif
+          #ifndef THREAD_QUERY_LIMITED_INFORMATION
+          #define THREAD_QUERY_LIMITED_INFORMATION (0x0800)
+          #endif
+
+          // Mandatory integrity labels (Vista+). SECURITY_MANDATORY_LABEL_AUTHORITY is
+          // used as the marker for "this SDK already knows about integrity levels".
+          #ifndef SECURITY_MANDATORY_LABEL_AUTHORITY
+          #ifndef LABEL_SECURITY_INFORMATION
+          #define LABEL_SECURITY_INFORMATION (0x00000010L)
+          #endif
+          #ifndef SDDL_MANDATORY_LABEL
+          #define SDDL_MANDATORY_LABEL TEXT("ML")
+          #endif
+          #ifndef SDDL_NO_WRITE_UP
+          #define SDDL_NO_WRITE_UP TEXT("NW")
+          #endif
+          #ifndef SDDL_NO_READ_UP
+          #define SDDL_NO_READ_UP TEXT("NR")
+          #endif
+          #ifndef SDDL_NO_EXECUTE_UP
+          #define SDDL_NO_EXECUTE_UP TEXT("NX")
+          #endif
+          #ifndef SE_GROUP_INTEGRITY
+          #define SE_GROUP_INTEGRITY (0x00000020L)
+          #endif
+          #ifndef SE_GROUP_INTEGRITY_ENABLED
+          #define SE_GROUP_INTEGRITY_ENABLED (0x00000040L)
+          #endif
+          // TokenIntegrityLevel is value 25 of TOKEN_INFORMATION_CLASS.
+          #define TokenIntegrityLevel ((TOKEN_INFORMATION_CLASS)25)
+          typedef struct _TOKEN_MANDATORY_LABEL {
+            SID_AND_ATTRIBUTES Label;
+          } TOKEN_MANDATORY_LABEL, *PTOKEN_MANDATORY_LABEL;
+          #endif  // !SECURITY_MANDATORY_LABEL_AUTHORITY
+
+          // ---- Shell (XP SP2 / Vista) --------------------------------------------
+          #ifndef SEE_MASK_NOZONECHECKS
+          #define SEE_MASK_NOZONECHECKS (0x00800000)
+          #endif
+          #ifndef LOAD_LIBRARY_AS_IMAGE_RESOURCE
+          #define LOAD_LIBRARY_AS_IMAGE_RESOURCE (0x00000020)
+          #endif
+          #ifndef LOAD_LIBRARY_AS_DATAFILE_EXCLUSIVE
+          #define LOAD_LIBRARY_AS_DATAFILE_EXCLUSIVE (0x00000040)
+          #endif
+
+          #ifndef SECURITY_MANDATORY_LABEL_AUTHORITY
+          #ifdef __cplusplus
+          #include <shlobj.h>
+
+          // Vista-style PIDL typedefs (used by SHOpenFolderAndSelectItems wrappers).
+          typedef LPCITEMIDLIST PCIDLIST_ABSOLUTE;
+          typedef LPCITEMIDLIST* PCUITEMID_CHILD_ARRAY;
+
+          // IApplicationAssociationRegistration (Vista default-programs API). The
+          // class is only ever instantiated after a runtime Vista version check; on
+          // older systems CoCreateInstance simply fails.
+          typedef enum LEGACY_ASSOCIATIONLEVEL {
+            AL_MACHINE,
+            AL_EFFECTIVE,
+            AL_USER
+          } ASSOCIATIONLEVEL;
+
+          typedef enum LEGACY_ASSOCIATIONTYPE {
+            AT_FILEEXTENSION,
+            AT_URLPROTOCOL,
+            AT_STARTMENUCLIENT,
+            AT_MIMETYPE
+          } ASSOCIATIONTYPE;
+
+          struct __declspec(uuid("4e530b0a-e611-4c77-a3ac-9031d022281b"))
+          IApplicationAssociationRegistration : public IUnknown {
+            virtual HRESULT STDMETHODCALLTYPE QueryCurrentDefault(
+                LPCWSTR pszQuery, ASSOCIATIONTYPE atQueryType,
+                ASSOCIATIONLEVEL alQueryLevel, LPWSTR* ppszAssociation) = 0;
+            virtual HRESULT STDMETHODCALLTYPE QueryAppIsDefault(
+                LPCWSTR pszQuery, ASSOCIATIONTYPE atQueryType,
+                ASSOCIATIONLEVEL alQueryLevel, LPCWSTR pszAppRegistryName,
+                BOOL* pfDefault) = 0;
+            virtual HRESULT STDMETHODCALLTYPE QueryAppIsDefaultAll(
+                ASSOCIATIONLEVEL alQueryLevel, LPCWSTR pszAppRegistryName,
+                BOOL* pfDefault) = 0;
+            virtual HRESULT STDMETHODCALLTYPE SetAppAsDefault(
+                LPCWSTR pszAppRegistryName, LPCWSTR pszSet,
+                ASSOCIATIONTYPE atSetType) = 0;
+            virtual HRESULT STDMETHODCALLTYPE SetAppAsDefaultAll(
+                LPCWSTR pszAppRegistryName) = 0;
+            virtual HRESULT STDMETHODCALLTYPE ClearUserAssociations(void) = 0;
+          };
+
+          static const CLSID CLSID_ApplicationAssociationRegistration = {
+              0x591209c7, 0x767b, 0x42b2,
+              {0x9f, 0xba, 0x44, 0xee, 0x46, 0x15, 0xf2, 0xc7}};
+
+          // psapi.h working-set structures (Vista SDK additions).
+          #include <psapi.h>
+          typedef union _PSAPI_WORKING_SET_BLOCK {
+            ULONG_PTR Flags;
+            struct {
+              ULONG_PTR Protection : 5;
+              ULONG_PTR ShareCount : 3;
+              ULONG_PTR Shared : 1;
+              ULONG_PTR Reserved : 3;
+          #if defined(_WIN64)
+              ULONG_PTR VirtualPage : 52;
+          #else
+              ULONG_PTR VirtualPage : 20;
+          #endif
+            };
+          } PSAPI_WORKING_SET_BLOCK, *PPSAPI_WORKING_SET_BLOCK;
+
+          typedef struct _PSAPI_WORKING_SET_INFORMATION {
+            ULONG_PTR NumberOfEntries;
+            PSAPI_WORKING_SET_BLOCK WorkingSetInfo[1];
+          } PSAPI_WORKING_SET_INFORMATION, *PPSAPI_WORKING_SET_INFORMATION;
+          #endif  // __cplusplus
+          #endif  // !SECURITY_MANDATORY_LABEL_AUTHORITY
+
+          #endif  // LEGACY_SDK_COMPAT_H_
+          '''
+
+          # --------------------------------------------------------------------------
+          _orig = {}
+          _new_files = []
+
+
+          def log(msg):
+              print('[patch] ' + msg, flush=True)
+
+
+          def read(rel):
+              with open(os.path.join(ROOT, rel), 'rb') as f:
+                  return f.read().decode('latin-1')
+
+
+          def save(rel, new_text):
+              old = read(rel)
+              if old == new_text:
+                  return False
+              _orig.setdefault(rel.replace('\\', '/'), old)
+              with open(os.path.join(ROOT, rel), 'wb') as f:
+                  f.write(new_text.encode('latin-1'))
+              return True
+
+
+          def eol_of(text):
+              return '\r\n' if '\r\n' in text else '\n'
+
+
+          def must_replace(text, old, new, what):
+              if old not in text:
+                  raise SystemExit('PATCH FAILED: anchor not found for %s' % what)
+              return text.replace(old, new, 1)
+
+
+          def write_new(path, text):
+              os.makedirs(os.path.dirname(path), exist_ok=True)
+              with open(path, 'w', newline='\n', encoding='utf-8') as f:
+                  f.write(text)
+
+
+          def fetch(url, dst):
+              if os.path.exists(dst) and os.path.getsize(dst) > 1000:
+                  return
+              for attempt in range(4):
+                  try:
+                      data = urllib.request.urlopen(url, timeout=60).read()
+                      break
+                  except Exception as e:  # noqa
+                      if attempt == 3:
+                          raise
+                      log('retry %s (%s)' % (url, e))
+                      time.sleep(3 * (attempt + 1))
+              with open(dst, 'wb') as f:
+                  f.write(data)
+
+
+          def build_files():
+              """Yield the relative path of every SCons build file in the tree (SCons'
+              own sources under third_party/scons are skipped)."""
+              for dp, dn, fn in os.walk(ROOT):
+                  dn[:] = [d for d in dn if d != '.git' and
+                           not (d == 'scons' and os.path.basename(dp) == 'third_party')]
+                  for f in fn:
+                      if f.startswith('SConscript') or f.endswith('.scons'):
+                          yield os.path.relpath(os.path.join(dp, f), ROOT)
+
+
+          # --------------------------------------------------------------------------
+          # 1. Compat headers (replacements for the Vista SDK)
+          # --------------------------------------------------------------------------
+          def find_on_path(var, name):
+              """Case-insensitive lookup of a file in the INCLUDE/LIB style variable."""
+              for d in os.environ.get(var, '').split(os.pathsep):
+                  if d and os.path.isdir(d):
+                      for f in os.listdir(d):
+                          if f.lower() == name.lower():
+                              return os.path.join(d, f)
+              return None
+
+
+          def install_compat_headers():
+              os.makedirs(COMPAT, exist_ok=True)
+              write_new(os.path.join(COMPAT, 'dwmapi.h'), DWMAPI_H)
+              write_new(os.path.join(COMPAT, 'legacy_sdk_compat.h'), LEGACY_SDK_COMPAT_H)
+              for name in MISSING_HEADERS:
+                  dst = os.path.join(COMPAT, name)
+                  found = find_on_path('INCLUDE', name)
+                  if os.path.exists(dst) or (found and os.path.dirname(found) != COMPAT):
+                      continue
+                  fetch(MINGW_URL % name, dst)
+                  if name == 'winhttp.h':
+                      # Wine/mingw spell BOOL as WINBOOL.
+                      with open(dst, 'r', encoding='latin-1', newline='') as f:
+                          text = f.read()
+                      with open(dst, 'w', encoding='latin-1', newline='') as f:
+                          f.write('#ifndef WINBOOL\n#define WINBOOL BOOL\n#endif\n' + text)
+              log('compat headers installed in %s' % COMPAT)
+
+
+          def ensure_import_libs():
+              """Create import libraries that are missing from the SDK, from mingw-w64's
+              32-bit .def files (stdcall-decorated), using the toolchain's lib.exe."""
+              lib_cmd = shlex.split(os.environ.get('LEGACY_LIB_CMD', 'lib.exe'))
+              for name in MISSING_IMPORT_LIBS:
+                  if find_on_path('LIB', name + '.lib'):
+                      log('%s.lib already available' % name)
+                      continue
+                  os.makedirs(COMPAT_LIB, exist_ok=True)
+                  deffile = os.path.join(COMPAT_LIB, name + '.def')
+                  out = os.path.join(COMPAT_LIB, name + '.lib')
+                  fetch(MINGW_DEF_URL % name, deffile)
+                  subprocess.run(lib_cmd + ['/nologo', '/machine:x86',
+                                            '/def:' + deffile, '/out:' + out],
+                                 check=True, cwd=COMPAT_LIB)
+                  if not os.path.exists(out):
+                      raise SystemExit('PATCH FAILED: could not create %s.lib' % name)
+                  log('generated %s.lib from mingw-w64 %s.def' % (name, name))
+
+
+          # --------------------------------------------------------------------------
+          # 2. Build-system patches
+          # --------------------------------------------------------------------------
+          def patch_win_version():
+              total = 0
+              for rel in build_files():
+                  text = read(rel)
+                  if '0x0600' not in text:
+                      continue
+
+                  def fix(m):
+                      return m.group(0).replace('0x0600', WIN_VER)
+
+                  new, n = re.subn(r'[^\n]*(?:_WIN32_WINNT|WINVER)[^\n]*0x0600[^\n]*', fix,
+                                   text)
+                  if n and save(rel, new):
+                      total += n
+              if total == 0:
+                  log('win version already patched')
+                  return
+              if total < 8:
+                  # main(2) + net(2) + base(2) + webkit(2) in the 0.2.149.27 tree.
+                  raise SystemExit('PATCH FAILED: expected >= 8 WINNT/WINVER lines, '
+                                   'patched %d' % total)
+              log('set _WIN32_WINNT/WINVER to %s on %d lines' % (WIN_VER, total))
+
+
+          def patch_scons_main():
+              rel = 'build/SConscript.main'
+              text = read(rel)
+
+              # Drop every reference to the (never published) Vista SDK from the search
+              # paths. Headers/libs now come from INCLUDE/LIB (setup-msvc + extras).
+              text, n = re.subn(r"(?m)^[ \t]*'\$PLATFORMSDK_VISTA/files/[^']*',[ \t]*\r?\n",
+                                '', text)
+              log('removed %d Vista SDK search-path entries' % n)
+
+              marker = 'Add ICU 3.8.1 public headers'
+              anchor = '  # Force scons to handle long include lines correctly.'
+              if marker not in text:
+                  eol = eol_of(text)
+                  snippet = eol.join([
+                      "  # Add ICU 3.8.1 public headers to Chromium's compiler include paths.",
+                      "  env.Prepend(",
+                      "      CPPPATH = [",
+                      "          '$ICU38_DIR/public/common',",
+                      "          '$ICU38_DIR/public/i18n',",
+                      "          '$ICU38_DIR/source/common',",
+                      "          '$ICU38_DIR/source/i18n',",
+                      "      ],",
+                      "  )",
+                      "",
+                      ""])
+                  text = must_replace(text, anchor, snippet + anchor, 'SConscript.main ICU')
+              save(rel, text)
+
+
+          def patch_scons_v8():
+              rel = 'build/SConscript.v8'
+              text = read(rel)
+              eol = eol_of(text)
+
+              marker = 'legacy-build: expose MSVC to nested V8 scons'
+              if marker not in text:
+                  snippet = eol.join([
+                      "env = env.Clone()",
+                      "",
+                      "# " + marker + ". The nested SCons builds its own",
+                      "# environment, so hand it the directory that contains cl.exe.",
+                      "import os",
+                      "_msvc_bin = None",
+                      "for _d in os.environ.get('PATH', '').split(os.pathsep):",
+                      "  if _d and os.path.isfile(os.path.join(_d, 'cl.exe')):",
+                      "    _msvc_bin = _d",
+                      "    break",
+                      "if not _msvc_bin:",
+                      "  raise RuntimeError('cl.exe not found on PATH')",
+                      "env['ENV']['PATH'] = _msvc_bin + os.pathsep + env['ENV'].get('PATH', '')",
+                      ""])
+                  text = must_replace(text, "env = env.Clone()" + eol, snippet, 'SConscript.v8 clone')
+
+              # Output locations used by the V8 revision we build.
+              for old, new in (
+                      ("File('#/../v8/bin/debug/mksnapshot.exe')",
+                       "File('#/../v8/obj/debug/mksnapshot.exe')"),
+                      ("File('#/../v8/bin/release/v8.exe')",
+                       "File('#/../v8/obj/release/shell.exe')"),
+                      ("File('#/../v8/bin/debug/v8.lib'),", "File('#/../v8/v8.lib'),"),
+                      ("File('#/../v8/bin/debug/snapshot-empty.obj')",
+                       "File('#/../v8/obj/debug/snapshot-empty.obj')")):
+                  text = text.replace(old, new)
+
+              final = ("SCONSFLAGS='-Q --warn=no-deprecated os=win32 mode=debug,release "
+                       "snapshot=on sample=shell')")
+              if final not in text:
+                  text = must_replace(text, "SCONSFLAGS='-Q --warn=no-deprecated')", final,
+                                      'V8 SCONSFLAGS')
+              save(rel, text)
+
+
+          def patch_scons_platform():
+              """SCons 0.98.3 only imports SYSTEMROOT/TEMP into ENV and relies on registry
+              based MSVC detection for PATH/INCLUDE/LIB. That detection finds nothing for a
+              toolchain that was unpacked rather than installed, which is why the nested
+              V8 build could not find cl.exe. Inherit them from the parent environment."""
+              rel = 'third_party/scons/scons-local-0.98.3/SCons/Platform/win32.py'
+              text = read(rel)
+              marker = 'legacy-build patch'
+              if marker in text:
+                  return
+              eol = eol_of(text)
+              anchor = "    env['ENV']['PATHEXT'] = '.COM;.EXE;.BAT;.CMD'"
+              snippet = eol.join([
+                  anchor,
+                  "",
+                  "    # " + marker + ": inherit an externally provisioned MSVC.",
+                  "    for _var in ('INCLUDE', 'LIB'):",
+                  "        _val = os.environ.get(_var)",
+                  "        if _val:",
+                  "            env['ENV'][_var] = _val",
+                  "    for _dir in os.environ.get('PATH', '').split(os.pathsep):",
+                  "        if _dir and os.path.isfile(os.path.join(_dir, 'cl.exe')):",
+                  "            env['ENV']['PATH'] = _dir + os.pathsep + env['ENV'].get('PATH', '')",
+                  "            break"])
+              save(rel, must_replace(text, anchor, snippet, 'SCons win32 platform'))
+
+
+          def patch_dwm_delayload():
+              total = 0
+              pat = re.compile(r"(?m)^[ \t]*'/DELAYLOAD:\"?dwmapi\.dll\"?',[ \t]*\r?\n")
+              for rel in build_files():
+                  text = read(rel)
+                  new, n = pat.subn('', text)
+                  if n and save(rel, new):
+                      total += n
+              lib_pat = re.compile(r"(?m)^[ \t]*'dwmapi\.lib',[ \t]*\r?\n")
+              libs = 0
+              for rel in build_files():
+                  text = read(rel)
+                  new, n = lib_pat.subn('', text)
+                  if n and save(rel, new):
+                      libs += n
+              log('removed %d /DELAYLOAD:dwmapi.dll flags and %d dwmapi.lib entries'
+                  % (total, libs))
+
+
+          def patch_icu_wrapper():
+              icu = os.path.join(ROOT, 'third_party', 'icu38')
+              main_scons = os.path.join(icu, 'icu38_main.scons')
+              wrapper = os.path.join(icu, 'SConscript')
+              if os.path.exists(main_scons) and not os.path.exists(wrapper):
+                  write_new(wrapper,
+                            "Import('env')\n"
+                            "SConscript('icu38_main.scons', exports=['env'])\n")
+                  log('created third_party/icu38/SConscript wrapper')
+
+
+          # --------------------------------------------------------------------------
+          # 3. Source patches
+          # --------------------------------------------------------------------------
+          def patch_dwmapi_pragma():
+              rel = 'chrome/common/win_util.cc'
+              text = read(rel)
+              new = re.sub(r'#pragma comment\(lib, "dwmapi\.lib"\)',
+                           '// dwmapi.lib is intentionally not linked: <dwmapi.h> is a '
+                           'run-time loading shim.', text)
+              save(rel, new)
+
+
+          def patch_uniscribe():
+              rel = 'base/gfx/uniscribe.cc'
+              text = read(rel)
+              pat = re.compile(r'static SCRIPT_CONTROL input_control = \{.*?\};[^\r\n]*', re.S)
+              if not pat.search(text):
+                  if 'input_control = {0};' in text:
+                      return
+                  raise SystemExit('PATCH FAILED: SCRIPT_CONTROL initializer not found')
+              # The 2003-era SDK's SCRIPT_CONTROL has fewer members than the Vista one;
+              # an all-zero aggregate is what the original code produced anyway.
+              save(rel, pat.sub('static SCRIPT_CONTROL input_control = {0};', text, 1))
+
+
+          VISTA_RE = re.compile(
+              r'\b(PROCESS_QUERY_LIMITED_INFORMATION|THREAD_(?:SET|QUERY)_LIMITED_INFORMATION'
+              r'|TOKEN_MANDATORY_LABEL|TokenIntegrityLevel|SDDL_MANDATORY_LABEL'
+              r'|SDDL_NO_(?:READ|WRITE|EXECUTE)_UP|LABEL_SECURITY_INFORMATION'
+              r'|PCIDLIST_ABSOLUTE|PCUITEMID_CHILD_ARRAY|SEE_MASK_NOZONECHECKS'
+              r'|PSAPI_WORKING_SET_\w+|LOAD_LIBRARY_AS_(?:DATAFILE_EXCLUSIVE|IMAGE_RESOURCE)'
+              r'|IApplicationAssociationRegistration'
+              r'|CLSID_ApplicationAssociationRegistration)\b')
+
+
+          def add_include_after_last(text, line):
+              eol = eol_of(text)
+              lines = text.split(eol)
+              depth = 0
+              last = None
+              for i, l in enumerate(lines):
+                  t = l.strip()
+                  if re.match(r'#\s*if', t):
+                      depth += 1
+                  elif re.match(r'#\s*endif', t):
+                      depth -= 1
+                  elif re.match(r'#\s*include', t) and depth == 0:
+                      last = i
+              if last is None:
+                  return None
+              lines.insert(last + 1, line)
+              return eol.join(lines)
+
+
+          def patch_vista_users():
+              """Make every translation unit that names a Vista-only SDK symbol include the
+              legacy fallback definitions (after its normal includes)."""
+              patched = []
+              for top in ('base', 'chrome', 'net', 'sandbox', 'webkit'):
+                  for dp, dn, fn in os.walk(os.path.join(ROOT, top)):
+                      dn[:] = [d for d in dn if d != 'third_party']
+                      for f in fn:
+                          if not f.endswith(('.cc', '.cpp')):
+                              continue
+                          rel = os.path.relpath(os.path.join(dp, f), ROOT)
+                          text = read(rel)
+                          if COMPAT_INCLUDE in text or not VISTA_RE.search(text):
+                              continue
+                          new = add_include_after_last(text, COMPAT_INCLUDE)
+                          if new is None:
+                              raise SystemExit('PATCH FAILED: no #include in %s' % rel)
+                          save(rel, new)
+                          patched.append(rel.replace('\\', '/'))
+              log('legacy compat include added to %d files:' % len(patched))
+              for p in patched:
+                  log('    ' + p)
+
+
+          # --------------------------------------------------------------------------
+          def write_patch_artifact():
+              if not _orig:
+                  log('no changes in this run; patch artifact left untouched')
+                  return
+              os.makedirs(OUT, exist_ok=True)
+              chunks = []
+              for rel in sorted(_orig):
+                  a = _orig[rel].splitlines(keepends=True)
+                  b = read(rel).splitlines(keepends=True)
+                  chunks.extend(difflib.unified_diff(a, b, 'a/' + rel, 'b/' + rel))
+              with open(os.path.join(OUT, 'chromium-legacy-sdk.patch'), 'w',
+                        encoding='latin-1', newline='') as f:
+                  f.write(''.join(chunks))
+              # ship the compat headers next to the patch so they can be committed
+              for name in os.listdir(COMPAT):
+                  with open(os.path.join(COMPAT, name), 'rb') as s, \
+                          open(os.path.join(OUT, name), 'wb') as d:
+                      d.write(s.read())
+              if os.path.isdir(COMPAT_LIB):
+                  for name in os.listdir(COMPAT_LIB):
+                      if name.endswith('.def'):
+                          with open(os.path.join(COMPAT_LIB, name), 'rb') as s, \
+                                  open(os.path.join(OUT, name), 'wb') as d:
+                              d.write(s.read())
+              log('patch artifact: %d changed files' % len(_orig))
+
+
+          def main():
+              if not os.path.isdir(ROOT):
+                  raise SystemExit('chromium tree not found at %s' % ROOT)
+              install_compat_headers()
+              ensure_import_libs()
+              patch_win_version()
+              patch_scons_main()
+              patch_scons_v8()
+              patch_scons_platform()
+              patch_dwm_delayload()
+              patch_icu_wrapper()
+              patch_dwmapi_pragma()
+              patch_uniscribe()
+              patch_vista_users()
+              write_patch_artifact()
+              log('done')
+
+
+          if __name__ == '__main__':
+              sys.exit(main())
+
+      - name: Upload patches
+        uses: actions/upload-artifact@v4
+        with:
+          name: legacy-patches
+          path: legacy-patches/
+          if-no-files-found: warn
+
+      # ── Build ──────────────────────────────────────────────────────────────
+      - name: Restore incremental build cache
+        id: build-cache
+        if: ${{ !inputs.clean_build }}
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            chromium/build/Hammer
+            chromium/build/.sconsign.dblite
+            src/v8/obj
+            src/v8/.sconsign.dblite
+          key: build-${{ github.run_id }}
+          restore-keys: build-
+
+      - name: Drop superseded build cache
+        if: ${{ steps.build-cache.outputs.cache-matched-key != '' }}
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh cache delete "${{ steps.build-cache.outputs.cache-matched-key }}" --repo "${{ github.repository }}"
+
+      - name: Build Chromium
+        run: |
+          $ErrorActionPreference = 'Continue'
+          Set-Location "$env:GITHUB_WORKSPACE\chromium\build"
+          & $env:PYTHON $env:SCONS_PY -j4 build_component=chrome os=win32 2>&1 |
+            Tee-Object -FilePath "$env:GITHUB_WORKSPACE\build.log"
+          exit $LASTEXITCODE
+
+      # Saved even when the build fails, so finished objects are not thrown away.
+      - name: Save incremental build cache
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            chromium/build/Hammer
+            chromium/build/.sconsign.dblite
+            src/v8/obj
+            src/v8/.sconsign.dblite
+          key: build-${{ github.run_id }}
+
+      - name: Upload build log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-log
+          path: build.log
+          retention-days: 7
+          if-no-files-found: ignore
+
+      - name: Upload binaries
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: chrome-0.2-win32-debug
+          path: |
+            chromium/build/Hammer/**/chrome.exe
+            chromium/build/Hammer/**/chrome.dll
+            chromium/build/Hammer/**/*.pak
+          if-no-files-found: warn
